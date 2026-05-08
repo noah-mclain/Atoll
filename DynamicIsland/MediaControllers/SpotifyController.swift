@@ -166,9 +166,12 @@ class SpotifyController: MediaControllerProtocol {
             state.artwork = existingArtwork
         }
 
-        if trackURI == currentCanvasTrackURI {
+        let isSameCanvasTrack = trackURI == currentCanvasTrackURI
+
+        if isSameCanvasTrack {
             state.liveArtworkURL = playbackState.liveArtworkURL
         } else {
+            state.liveArtworkURL = nil
             currentCanvasTrackURI = trackURI.isEmpty ? nil : trackURI
             canvasFetchTask?.cancel()
             canvasFetchTask = nil
@@ -185,6 +188,7 @@ class SpotifyController: MediaControllerProtocol {
             artworkFetchTask?.cancel()
 
             let currentState = state
+            let expectedTrackURI = trackURI
 
             artworkFetchTask = Task {
                 do {
@@ -192,6 +196,10 @@ class SpotifyController: MediaControllerProtocol {
 
                     await MainActor.run { [weak self] in
                         guard let self = self else { return }
+                        guard expectedTrackURI.isEmpty || self.currentCanvasTrackURI == expectedTrackURI else {
+                            self.artworkFetchTask = nil
+                            return
+                        }
                         var updatedState = currentState
                         updatedState.artwork = data
                         updatedState.liveArtworkURL = self.playbackState.liveArtworkURL

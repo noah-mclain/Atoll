@@ -33290,6 +33290,9 @@
         }
       }
     },
+    "Replaces the artwork tile with the live canvas when the current app provides one, and reuses that moving canvas for the surrounding lighting effect." : {
+
+    },
     "Request Access" : {
       "localizations" : {
         "fr" : {
@@ -34267,7 +34270,7 @@
         }
       }
     },
-    "Right-click the album art on the lock screen to set it as the wallpaper. Right-click again or click the background to restore the original wallpaper. The swap is temporary and leaves no trace in System Settings." : {
+    "Right-click the album art on the lock screen to set it as the wallpaper. Right-click again or click the background to restore the original wallpaper. If a canvas is available, Atoll can also keep the same album art + player layout on top of the live canvas." : {
 
     },
     "Ring" : {
@@ -37328,6 +37331,9 @@
           }
         }
       }
+    },
+    "Show live canvas in Dynamic Island" : {
+
     },
     "Show location label" : {
       "localizations" : {
@@ -43392,6 +43398,9 @@
           }
         }
       }
+    },
+    "Use album art layout over fullscreen canvas" : {
+
     },
     "Use circular battery indicator" : {
       "localizations" : {

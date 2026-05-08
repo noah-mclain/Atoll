@@ -36,6 +36,7 @@ struct LockScreenMusicPanel: View {
 
     @ObservedObject var musicManager = MusicManager.shared
     @ObservedObject private var routeManager = AudioRouteManager.shared
+    @ObservedObject private var fullscreenArtworkManager = FullScreenArtworkWindowManager.shared
     @StateObject private var volumeModel = MediaOutputVolumeViewModel()
     @ObservedObject private var airPlayManager = AppleMusicAirPlayManager.shared
     @ObservedObject private var animator: LockScreenPanelAnimator
@@ -122,6 +123,22 @@ struct LockScreenMusicPanel: View {
     private var usesEnhancedCustomLiquidBorder: Bool {
         usesCustomLiquidGlass && useEnhancedLiquidBorder
     }
+
+    private var hidesInlineArtworkForSpotifyCanvasFallback: Bool {
+        fullscreenArtworkManager.isShowingSpotifyCanvasFallback
+    }
+
+    private var usesSpotifyCanvasFallbackContentPresentation: Bool {
+        fullscreenArtworkManager.isShowingSpotifyCanvasFallback
+    }
+
+    private var showsDetachedFullscreenLyrics: Bool {
+        usesSpotifyCanvasFallbackContentPresentation && enableLyrics
+    }
+
+    private var shouldShowInlineLyrics: Bool {
+        enableLyrics && !showsDetachedFullscreenLyrics
+    }
     
     var body: some View {
         if isActive && musicManager.hasActiveSession {
@@ -140,12 +157,17 @@ struct LockScreenMusicPanel: View {
         .frame(width: currentSize.width, height: currentSize.height, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: panelCornerRadius, style: .continuous))
         .overlay {
-            if showPanelBorder {
+            if showPanelBorder && !usesSpotifyCanvasFallbackContentPresentation {
                 panelBorderOverlay
             }
         }
-        .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
-        .contentShape(RoundedRectangle(cornerRadius: panelCornerRadius, style: .continuous))
+        .shadow(
+            color: usesSpotifyCanvasFallbackContentPresentation ? .clear : Color.black.opacity(0.3),
+            radius: usesSpotifyCanvasFallbackContentPresentation ? 0 : 20,
+            x: 0,
+            y: usesSpotifyCanvasFallbackContentPresentation ? 0 : 10
+        )
+        .contentShape(Rectangle())
         .animation(.easeInOut(duration: 0.28), value: isExpanded)
         .animation(.easeInOut(duration: 0.24), value: shouldShowVolumeSlider)
         .onAppear {
@@ -231,9 +253,13 @@ struct LockScreenMusicPanel: View {
                 collapsedLayout
             }
         }
-        .padding(.horizontal, isExpanded ? 24 : 20)
-        .padding(.vertical, isExpanded ? 22 : 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, usesSpotifyCanvasFallbackContentPresentation ? 8 : (isExpanded ? 24 : 20))
+        .padding(.vertical, usesSpotifyCanvasFallbackContentPresentation ? 0 : (isExpanded ? 22 : 16))
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: usesSpotifyCanvasFallbackContentPresentation ? .center : .topLeading
+        )
     }
 
     private var collapsedLayout: some View {
@@ -248,25 +274,40 @@ struct LockScreenMusicPanel: View {
     }
 
     private var expandedLayout: some View {
-        HStack(alignment: .center, spacing: expandedContentSpacing) {
-            albumArtButton(size: 230, cornerRadius: expandedAlbumArtCornerRadius)
-                .frame(width: 230, height: 230)
+        Group {
+            if hidesInlineArtworkForSpotifyCanvasFallback {
+                VStack(alignment: .leading, spacing: 20) {
+                    expandedHeader
+                    progressBar
+                        .padding(.top, 10)
+                        .frame(maxWidth: .infinity)
+                    playbackControls(alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .center, spacing: expandedContentSpacing) {
+                    albumArtButton(size: 230, cornerRadius: expandedAlbumArtCornerRadius)
+                        .frame(width: 230, height: 230)
 
-            VStack(alignment: .leading, spacing: 20) {
-                expandedHeader
-                progressBar
-                    .padding(.top, 10)
-                    .frame(maxWidth: .infinity)
-                playbackControls(alignment: .leading)
+                    VStack(alignment: .leading, spacing: 20) {
+                        expandedHeader
+                        progressBar
+                            .padding(.top, 10)
+                            .frame(maxWidth: .infinity)
+                        playbackControls(alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var collapsedHeader: some View {
-        HStack(alignment: .center, spacing: 16) {
-            albumArtButton(size: 60, cornerRadius: collapsedAlbumArtCornerRadius)
+        HStack(alignment: .center, spacing: hidesInlineArtworkForSpotifyCanvasFallback ? 10 : 16) {
+            if !hidesInlineArtworkForSpotifyCanvasFallback {
+                albumArtButton(size: 60, cornerRadius: collapsedAlbumArtCornerRadius)
+            }
 
             GeometryReader { geo in
                 VStack(alignment: .leading, spacing: 1) {
@@ -338,9 +379,11 @@ struct LockScreenMusicPanel: View {
     }
 
     private func albumArtButton(size: CGFloat, cornerRadius: CGFloat) -> some View {
-        ZStack(alignment: .bottomTrailing) {
+        let artworkCornerRadius = resolvedArtworkCornerRadius(from: cornerRadius)
+
+        return ZStack(alignment: .bottomTrailing) {
             if isArtworkFullscreen && !keepAlbumArtVisibleDuringFullscreenArtwork {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous)
                     .fill(Color.white.opacity(0.06))
                     .overlay(
                         Image(systemName: "photo.fill")
@@ -366,8 +409,8 @@ struct LockScreenMusicPanel: View {
             suspended: isParallaxSuspended
         )
         .frame(width: size)
-        .background(albumArtBackground(cornerRadius: cornerRadius))
-        .clipShape(RoundedRectangle(cornerRadius: musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? appIconCornerRadius/3 : appIconCornerRadius, style: .continuous))
+        .background(albumArtBackground(cornerRadius: artworkCornerRadius))
+        .clipShape(RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous))
         .opacity(musicManager.isPlaying ? 1 : 0.4)
         .scaleEffect(musicManager.isPlaying ? 1 : 0.85)
         .animation(.easeInOut(duration: 0.2), value: musicManager.isPlaying)
@@ -544,7 +587,7 @@ struct LockScreenMusicPanel: View {
     
     private func playbackControls(alignment: Alignment) -> some View {
         let spacing: CGFloat = isExpanded ? 24 : 20
-        let verticalSpacing: CGFloat = (shouldShowVolumeSlider || enableLyrics) ? 14 : 10
+        let verticalSpacing: CGFloat = (shouldShowVolumeSlider || shouldShowInlineLyrics) ? 14 : 10
 
         return VStack(spacing: verticalSpacing) {
             controlsRow(alignment: alignment, spacing: spacing)
@@ -565,7 +608,7 @@ struct LockScreenMusicPanel: View {
                 }
             }
 
-            if enableLyrics {
+            if shouldShowInlineLyrics {
                 lyricsSection(alignment: alignment)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -1009,7 +1052,7 @@ struct LockScreenMusicPanel: View {
     }
 
     private var lyricsExtraHeight: CGFloat {
-        lyricsHeight(forExpanded: isExpanded, enabled: enableLyrics)
+        lyricsHeight(forExpanded: isExpanded, enabled: shouldShowInlineLyrics)
     }
 
     private var accessorySectionExtraHeight: CGFloat {
@@ -1039,7 +1082,7 @@ struct LockScreenMusicPanel: View {
     private func panelAdditionalHeight(forExpanded expanded: Bool) -> CGFloat {
         sliderHeight(forExpanded: expanded, visible: shouldShowVolumeSlider) +
         accessorySectionExtraHeight +
-        lyricsHeight(forExpanded: expanded, enabled: enableLyrics)
+        lyricsHeight(forExpanded: expanded, enabled: shouldShowInlineLyrics)
     }
 
     private func updatePanelSize(animated: Bool = true) {
@@ -1094,7 +1137,11 @@ struct LockScreenMusicPanel: View {
 
     @ViewBuilder
     private var panelBackgroundLayer: some View {
-        if usesCustomLiquidGlass {
+        if usesSpotifyCanvasFallbackContentPresentation {
+            Color.clear
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        } else if usesCustomLiquidGlass {
             customLiquidPanelBackdrop
         } else if usesStandardLiquidGlass {
             standardLiquidPanelBackdrop
@@ -1192,7 +1239,8 @@ struct LockScreenMusicPanel: View {
         Image(nsImage: musicManager.albumArt)
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? cornerRadius/3 : cornerRadius))
+            .compositingGroup()
+            .clipShape(RoundedRectangle(cornerRadius: resolvedArtworkCornerRadius(from: cornerRadius), style: .continuous))
     }
 
     @ViewBuilder
@@ -1228,6 +1276,13 @@ struct LockScreenMusicPanel: View {
 
     private var appIconOffset: CGFloat {
         isExpanded ? 18 : 12
+    }
+
+    private func resolvedArtworkCornerRadius(from baseCornerRadius: CGFloat) -> CGFloat {
+        let aspectRatio = musicManager.albumArt.size.height > 0
+            ? musicManager.albumArt.size.width / musicManager.albumArt.size.height
+            : 1
+        return aspectRatio > 1.0 ? baseCornerRadius / 3 : baseCornerRadius
     }
 
     @available(macOS 26.0, *)
@@ -1480,9 +1535,48 @@ private extension View {
 
 final class RightClickNSView: NSView {
     var onRightClick: (() -> Void)?
+    private var eventMonitor: Any?
 
-    override func rightMouseDown(with event: NSEvent) {
-        onRightClick?()
+    deinit {
+        removeEventMonitor()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+
+        if window == nil {
+            removeEventMonitor()
+        } else {
+            installEventMonitorIfNeeded()
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    private func installEventMonitorIfNeeded() {
+        guard eventMonitor == nil else { return }
+
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown]) { [weak self] event in
+            guard let self, let window = self.window, event.window === window else {
+                return event
+            }
+
+            let pointInView = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(pointInView) else {
+                return event
+            }
+
+            self.onRightClick?()
+            return nil
+        }
+    }
+
+    private func removeEventMonitor() {
+        guard let eventMonitor else { return }
+        NSEvent.removeMonitor(eventMonitor)
+        self.eventMonitor = nil
     }
 }
 
