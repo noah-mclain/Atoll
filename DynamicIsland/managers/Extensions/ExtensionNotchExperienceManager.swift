@@ -137,6 +137,7 @@ final class ExtensionNotchExperienceManager: ObservableObject {
         guard previousCount != activeExperiences.count else { return }
         Logger.log("Dismissed notch experience \(experienceID) from \(bundleIdentifier)", category: .extensions)
         ExtensionXPCServiceHost.shared.notifyNotchExperienceDismiss(bundleIdentifier: bundleIdentifier, experienceID: experienceID)
+        ExtensionRPCServer.shared.notifyNotchExperienceDismiss(bundleIdentifier: bundleIdentifier, experienceID: experienceID)
         logDiagnostics("Removed notch experience \(experienceID) for \(bundleIdentifier); remaining: \(activeExperiences.count)")
         broadcastSnapshot()
     }
@@ -148,7 +149,10 @@ final class ExtensionNotchExperienceManager: ObservableObject {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
             activeExperiences.removeAll { $0.bundleIdentifier == bundleIdentifier }
         }
-        ids.forEach { ExtensionXPCServiceHost.shared.notifyNotchExperienceDismiss(bundleIdentifier: bundleIdentifier, experienceID: $0) }
+        ids.forEach {
+            ExtensionXPCServiceHost.shared.notifyNotchExperienceDismiss(bundleIdentifier: bundleIdentifier, experienceID: $0)
+            ExtensionRPCServer.shared.notifyNotchExperienceDismiss(bundleIdentifier: bundleIdentifier, experienceID: $0)
+        }
         if !ids.isEmpty {
             logDiagnostics("Removed all notch experiences for \(bundleIdentifier); ids: \(ids.joined(separator: ", "))")
             broadcastSnapshot()

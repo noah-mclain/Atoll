@@ -41,13 +41,16 @@ struct MinimalisticMusicView: View {
                         GeometryReader { geo in
                             VStack(alignment: .center, spacing: 2) {
                                 if !musicManager.songTitle.isEmpty {
-                                    MarqueeText(
-                                        $musicManager.songTitle,
+                                    MusicTitleMarqueeView(
+                                        text: musicManager.songTitle,
+                                        isExplicit: musicManager.isCurrentTrackExplicit,
                                         font: .system(size: 12, weight: .semibold),
                                         nsFont: .subheadline,
                                         textColor: Defaults[.coloredSpectrogram] ? Color(nsColor: musicManager.avgColor) : Color.gray,
                                         minDuration: 0.4,
-                                        frameWidth: max(0, geo.size.width - 8)
+                                        frameWidth: max(0, geo.size.width - 8),
+                                        alignment: .center,
+                                        badgeHeight: 13
                                     )
                                 }
 
@@ -63,6 +66,7 @@ struct MinimalisticMusicView: View {
                                 // Lyrics under the author name (same font size as author)
                                 if enableLyrics {
                                     lyricsLineView
+                                        .font(.system(size: 11, weight: .regular))
                                 }
                             }
                             .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
@@ -92,10 +96,11 @@ struct MinimalisticMusicView: View {
                 .background(
                     Image(nsImage: musicManager.albumArt)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? 4 : 12))
+
                 )
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 18)) // Dramatically increased corner radius for minimalistic mode
                 .albumArtFlip(angle: musicManager.flipAngle)
                 .frame(width: max(0, vm.effectiveClosedNotchHeight - 12), height: max(0, vm.effectiveClosedNotchHeight - 12))
         }
@@ -110,7 +115,7 @@ struct MinimalisticMusicView: View {
                 .fill(Defaults[.coloredSpectrogram] ? Color(nsColor: musicManager.avgColor).gradient : Color.gray.gradient)
                 .frame(width: 50, alignment: .center)
                 .mask {
-                    AudioSpectrumView(isPlaying: $musicManager.isPlaying)
+                    AudioVisualizerView(isPlaying: $musicManager.isPlaying)
                         .frame(width: 16, height: 12)
                 }
                 .frame(width: max(0, vm.effectiveClosedNotchHeight - (isHovering ? 0 : 12)),

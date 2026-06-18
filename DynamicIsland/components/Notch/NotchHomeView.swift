@@ -23,6 +23,129 @@
 import Combine
 import Defaults
 import SwiftUI
+import AppKit
+import AVFoundation
+
+private final class DynamicIslandArtworkLoopController {
+    let player: AVQueuePlayer
+    private var looper: AVPlayerLooper?
+    private var playbackStateCancellable: AnyCancellable?
+
+    init(url: URL) {
+        let item = AVPlayerItem(url: url)
+        player = AVQueuePlayer()
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+        looper = AVPlayerLooper(player: player, templateItem: item)
+
+        if MusicManager.shared.isPlaying {
+            player.play()
+        }
+
+        playbackStateCancellable = MusicManager.shared.$isPlaying
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isPlaying in
+                guard let self else { return }
+                if isPlaying {
+                    self.player.play()
+                } else {
+                    self.player.pause()
+                }
+            }
+    }
+
+    deinit {
+        player.pause()
+        looper = nil
+        playbackStateCancellable = nil
+    }
+}
+
+private final class DynamicIslandArtworkVideoContainerView: NSView {
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.backgroundColor = NSColor.clear.cgColor
+        layer?.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        playerLayer.frame = bounds
+    }
+}
+
+private struct DynamicIslandArtworkVideoView: NSViewRepresentable {
+    let url: URL
+    let videoGravity: AVLayerVideoGravity
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> DynamicIslandArtworkVideoContainerView {
+        let view = DynamicIslandArtworkVideoContainerView(frame: .zero)
+        context.coordinator.attach(layer: view.playerLayer, url: url, gravity: videoGravity)
+        return view
+    }
+
+    func updateNSView(_ nsView: DynamicIslandArtworkVideoContainerView, context: Context) {
+        context.coordinator.attach(layer: nsView.playerLayer, url: url, gravity: videoGravity)
+    }
+
+    final class Coordinator {
+        private var controller: DynamicIslandArtworkLoopController?
+        private var currentURL: URL?
+
+        func attach(layer: AVPlayerLayer, url: URL, gravity: AVLayerVideoGravity) {
+            layer.videoGravity = gravity
+
+            if currentURL != url || controller == nil {
+                currentURL = url
+                controller = DynamicIslandArtworkLoopController(url: url)
+            }
+
+            if layer.player !== controller?.player {
+                layer.player = controller?.player
+            }
+        }
+    }
+}
+
+struct DynamicIslandArtworkSourceView: View {
+    @ObservedObject private var musicManager = MusicManager.shared
+    @Default(.showLiveCanvasInDynamicIsland) private var showLiveCanvasInDynamicIsland
+
+    let cornerRadius: CGFloat
+    let contentMode: ContentMode
+
+    private var liveCanvasURL: URL? {
+        guard showLiveCanvasInDynamicIsland else { return nil }
+        return musicManager.videoArtworkURL
+    }
+
+    var body: some View {
+        Group {
+            if let liveCanvasURL {
+                DynamicIslandArtworkVideoView(url: liveCanvasURL, videoGravity: .resizeAspectFill)
+            } else {
+                Image(nsImage: musicManager.albumArt)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+}
 
 // MARK: - Music Player Components
 
@@ -33,11 +156,8 @@ struct MusicPlayerView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             AlbumArtView(vm: vm, albumArtNamespace: albumArtNamespace)
-                .padding(.all, 5)
             MusicControlsView()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .drawingGroup()
-                .compositingGroup()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -46,7 +166,22 @@ struct MusicPlayerView: View {
 struct AlbumArtView: View {
     @ObservedObject var musicManager = MusicManager.shared
     @ObservedObject var vm: DynamicIslandViewModel
+    @Default(.showLiveCanvasInDynamicIsland) private var showLiveCanvasInDynamicIsland
     let albumArtNamespace: Namespace.ID
+
+    private var usesLiveCanvasArtwork: Bool {
+        showLiveCanvasInDynamicIsland && musicManager.videoArtworkURL != nil
+    }
+
+    private var albumArtCornerRadius: CGFloat {
+        Defaults[.cornerRadiusScaling]
+            ? musicManager.albumArt.size.width / musicManager.albumArt.size.height > 1.0
+                ? MusicPlayerImageSizes.cornerRadiusInset.opened / 3
+                : MusicPlayerImageSizes.cornerRadiusInset.opened
+            : musicManager.albumArt.size.width / musicManager.albumArt.size.height > 1.0
+                ? MusicPlayerImageSizes.cornerRadiusInset.closed / 3
+                : MusicPlayerImageSizes.cornerRadiusInset.closed
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -58,20 +193,29 @@ struct AlbumArtView: View {
     }
 
     private var albumArtBackground: some View {
-        Image(nsImage: musicManager.albumArt)
-            .resizable()
-            .clipped()
-            .clipShape(
-                RoundedRectangle(
-                    cornerRadius: Defaults[.cornerRadiusScaling]
-                        ? MusicPlayerImageSizes.cornerRadiusInset.opened
-                        : MusicPlayerImageSizes.cornerRadiusInset.closed)
-            )
+        Color.clear
             .aspectRatio(1, contentMode: .fit)
+            .background(
+                DynamicIslandArtworkSourceView(
+                    cornerRadius: albumArtCornerRadius,
+                    contentMode: .fill
+                )
+            )
+            .clipped()
             .scaleEffect(x: 1.3, y: 1.4)
             .rotationEffect(.degrees(92))
             .blur(radius: 40)
-            .opacity(musicManager.isPlaying ? 0.5 : 0)
+            .opacity(
+                usesLiveCanvasArtwork
+                    ? (musicManager.isPlaying ? 0.62 : 0.18)
+                    : (musicManager.isPlaying ? 0.5 : 0)
+            )
+            .shadow(
+                color: Color(nsColor: musicManager.avgColor).opacity(usesLiveCanvasArtwork ? 0.24 : 0.16),
+                radius: usesLiveCanvasArtwork ? 22 : 14,
+                x: 0,
+                y: 0
+            )
     }
 
     private var albumArtButton: some View {
@@ -84,7 +228,9 @@ struct AlbumArtView: View {
                     appIconOverlay
                 }
                 .albumArtFlip(angle: musicManager.flipAngle)
-                .parallax3D(magnitude: 12)
+                .parallax3D()
+                .padding(.bottom, -5)
+
             }
             .buttonStyle(PlainButtonStyle())
             .scaleEffect(musicManager.isPlaying ? 1 : 0.85)
@@ -102,17 +248,16 @@ struct AlbumArtView: View {
     }
 
     private var albumArtImage: some View {
-        Image(nsImage: musicManager.albumArt)
-            .resizable()
+        Color.clear
             .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                DynamicIslandArtworkSourceView(
+                    cornerRadius: albumArtCornerRadius,
+                    contentMode: .fit
+                )
+            }
             .matchedGeometryEffect(id: "albumArt", in: albumArtNamespace)
         .clipped()
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: Defaults[.cornerRadiusScaling]
-                    ? MusicPlayerImageSizes.cornerRadiusInset.opened
-                    : MusicPlayerImageSizes.cornerRadiusInset.closed)
-        )
     }
 
     @ViewBuilder
@@ -120,8 +265,8 @@ struct AlbumArtView: View {
         if vm.notchState == .open && !musicManager.usingAppIconForArtwork {
             AppIcon(for: musicManager.bundleIdentifier ?? "com.apple.Music")
                 .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 30, height: 30)
+                .scaledToFill()
+                .frame(width: 36, height: 36)
                 .offset(x: 10, y: 10)
                 .transition(.scale.combined(with: .opacity).animation(.bouncy.delay(0.3)))
                 .zIndex(2)
@@ -174,7 +319,15 @@ struct MusicControlsView: View {
 
     private func songInfo(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            MarqueeText($musicManager.songTitle, font: .headline, nsFont: .headline, textColor: .white, frameWidth: width)
+            MusicTitleMarqueeView(
+                text: musicManager.songTitle,
+                isExplicit: musicManager.isCurrentTrackExplicit,
+                font: .headline,
+                nsFont: .headline,
+                textColor: .white,
+                frameWidth: width,
+                badgeHeight: 14
+            )
             MarqueeText(
                 $musicManager.artistName,
                 font: .headline,
@@ -201,9 +354,9 @@ struct MusicControlsView: View {
 
                     MarqueeText(
                         lyricsBinding,
-                        font: .headline,
+                        font: .system(size: 12, weight: .regular),
                         nsFont: .headline,
-                        textColor: .white.opacity(0.8),
+                        textColor: .white.opacity(0.7),
                         minDuration: 0.35,
                         frameWidth: width
                     )
@@ -222,7 +375,7 @@ struct MusicControlsView: View {
     }
 
     private var musicSlider: some View {
-        TimelineView(.animation(minimumInterval: 1.0, paused: isProgressTimelinePaused)) { timeline in
+        TimelineView(.animation(paused: isProgressTimelinePaused)) { timeline in
             MusicSliderView(
                 sliderValue: $sliderValue,
                 duration: $musicManager.songDuration,
@@ -392,9 +545,13 @@ struct MusicControlsView: View {
         }
     }
 
+    private var isAppleMusicActive: Bool {
+        musicManager.bundleIdentifier == "com.apple.Music"
+    }
+
     private var displayedSlots: [MusicControlButton] {
         if showCustomControls {
-            let normalized = slotConfig.normalized(allowingMediaOutput: showMediaOutputControl)
+            let normalized = slotConfig.normalized(allowingMediaOutput: showMediaOutputControl, isAppleMusicActive: isAppleMusicActive)
             return normalized.contains(where: { $0 != .none }) ? normalized : MusicControlButton.defaultLayout
         }
 
@@ -468,6 +625,8 @@ struct MusicControlsView: View {
             }
         case .mediaOutput:
             MediaOutputPickerButton()
+        case .airPlay:
+            AirPlayPickerButton()
         case .lyrics:
             HoverButton(
                 icon: enableLyrics ? "quote.bubble.fill" : "quote.bubble",
@@ -529,11 +688,12 @@ struct NotchHomeView: View {
     @ObservedObject private var extensionNotchExperienceManager = ExtensionNotchExperienceManager.shared
     @ObservedObject private var musicManager = MusicManager.shared
     @Default(.showStandardMediaControls) private var showStandardMediaControls
+    @Default(.autoHideInactiveNotchMediaPlayer) private var autoHideInactiveNotchMediaPlayer
     let albumArtNamespace: Namespace.ID
 
     /// Whether the music player should actively display (enabled AND has real content).
     private var shouldShowMusicPlayer: Bool {
-        showStandardMediaControls && musicManager.hasActiveSession
+        showStandardMediaControls && (!autoHideInactiveNotchMediaPlayer || musicManager.hasActiveSession)
     }
     
     var body: some View {
@@ -592,6 +752,7 @@ struct NotchHomeView: View {
             .combined(with: .blurReplace.animation(.smooth.speed(0.9)))
             .combined(with: .move(edge: .top)))
         .blur(radius: vm.notchState == .closed ? 30 : 0)
+        .padding(Defaults[.enableMinimalisticUI] ? 0 : 8) //Putting the main padding for home view here for consistency
     }
 
     private var minimalisticOverridePayload: ExtensionNotchExperiencePayload? {
@@ -700,6 +861,7 @@ struct MusicSliderView: View {
             LiveStreamProgressIndicator(tint: sliderTint)
                 .frame(maxWidth: .infinity)
                 .frame(height: sliderFrameHeight)
+                
         case .inline:
             HStack(spacing: 10) {
                 Spacer()
@@ -707,6 +869,7 @@ struct MusicSliderView: View {
                 LiveStreamProgressIndicator(tint: sliderTint)
                     .frame(maxWidth: .infinity)
                     .frame(height: sliderFrameHeight)
+
                 Spacer()
                     .frame(width: 48)
             }
@@ -724,21 +887,12 @@ struct MusicSliderView: View {
             restingTrackHeight: restingTrackHeight,
             draggingTrackHeight: draggingTrackHeight
         )
-        // Smoothly interpolate the filled track between 1-second ticks using
-        // Core Animation — runs on the GPU with zero CPU polling cost.
-        // Disabled while dragging or paused so the bar responds instantly.
-        .animation(
-            !dragging && isPlaying && !isLiveStream
-                ? .linear(duration: 1.0)
-                : nil,
-            value: sliderValue
-        )
     }
 
-    private var sliderTint: Color {
+    private var sliderTint: Color {//
         switch Defaults[.sliderColor] {
         case .albumArt:
-            return Color(nsColor: color).ensureMinimumBrightness(factor: 0.8)
+            return Color(nsColor: color).ensureMinimumBrightness(factor: 0.6)
         case .accent:
             return .accentColor
         case .white:
@@ -892,6 +1046,62 @@ private struct MediaOutputPickerButton: View {
     }
 }
 
+private struct AirPlayPickerButton: View {
+    @ObservedObject private var musicManager = MusicManager.shared
+    @ObservedObject private var airPlayManager = AppleMusicAirPlayManager.shared
+    @State private var isPopoverPresented = false
+    @State private var isHoveringPopover = false
+    @EnvironmentObject private var vm: DynamicIslandViewModel
+
+    private var isAppleMusicActive: Bool {
+        musicManager.bundleIdentifier == "com.apple.Music"
+    }
+
+    var body: some View {
+        HoverButton(icon: "airplayaudio", iconColor: .white, scale: .medium) {
+            isPopoverPresented.toggle()
+            if isPopoverPresented {
+                Task { await airPlayManager.refreshDevices() }
+            }
+        }
+        .accessibilityLabel("AirPlay")
+        .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
+            AirPlaySelectorPopover(
+                airPlayManager: airPlayManager,
+                onHoverChanged: { hovering in
+                    isHoveringPopover = hovering
+                    updatePopoverActivity()
+                }
+            ) {
+                isPopoverPresented = false
+                isHoveringPopover = false
+                updatePopoverActivity()
+            }
+        }
+        .onAppear {
+            if isAppleMusicActive {
+                Task { await airPlayManager.refreshDevices() }
+            }
+        }
+        .onChange(of: isPopoverPresented) { _, presented in
+            if !presented { isHoveringPopover = false }
+            updatePopoverActivity()
+        }
+        .onChange(of: musicManager.bundleIdentifier) { _, newBundle in
+            if newBundle == "com.apple.Music" {
+                Task { await airPlayManager.refreshDevices() }
+            }
+        }
+        .onDisappear {
+            vm.isMediaOutputPopoverActive = false
+        }
+    }
+
+    private func updatePopoverActivity() {
+        vm.isMediaOutputPopoverActive = isPopoverPresented && isHoveringPopover
+    }
+}
+
 struct MediaOutputSelectorPopover: View {
     @ObservedObject var routeManager: AudioRouteManager
     @ObservedObject var volumeModel: MediaOutputVolumeViewModel
@@ -1001,7 +1211,7 @@ struct MediaOutputSelectorPopover: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 180)
+                .frame(maxHeight: 240)
             }
         }
     }
@@ -1019,6 +1229,104 @@ struct MediaOutputSelectorPopover: View {
 
     private var volumePercentage: String {
         "\(Int(round(volumeModel.level * 100)))%"
+    }
+}
+
+struct AirPlaySelectorPopover: View {
+    @ObservedObject var airPlayManager: AppleMusicAirPlayManager
+    var onHoverChanged: (Bool) -> Void
+    var dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("AirPlay")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if airPlayManager.devices.isEmpty {
+                Text("No AirPlay devices found")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(airPlayManager.devices) { device in
+                            VStack(spacing: 4) {
+                                Button {
+                                    Task { await airPlayManager.toggleDevice(device) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: device.iconName)
+                                            .font(.system(size: 14, weight: .medium))
+                                        Text(device.name)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        if device.isSelected {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 12, weight: .bold))
+                                        }
+                                    }
+                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(device.isSelected ? Color.primary.opacity(0.12) : .clear)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+
+                                if device.isSelected {
+                                    AirPlayVolumeSlider(
+                                        airPlayManager: airPlayManager,
+                                        deviceID: device.id
+                                    )
+                                    .padding(.horizontal, 8)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 300)
+            }
+        }
+        .frame(width: 240)
+        .padding(16)
+        .onHover { hovering in
+            onHoverChanged(hovering)
+        }
+        .onDisappear {
+            onHoverChanged(false)
+        }
+    }
+}
+
+/// Local @State slider decoupled from the manager's @Published state.
+/// This prevents SwiftUI from resetting the slider position when other
+/// published properties on the manager change during a drag.
+struct AirPlayVolumeSlider: View {
+    @ObservedObject var airPlayManager: AppleMusicAirPlayManager
+    let deviceID: String
+
+    @State private var sliderValue: Double = 0
+    @State private var isSyncing = false
+
+    var body: some View {
+        Slider(value: $sliderValue, in: 0...100)
+            .tint(.accentColor)
+            .onAppear {
+                isSyncing = true
+                sliderValue = Double(airPlayManager.currentVolume(for: deviceID))
+                isSyncing = false
+            }
+            .onChange(of: sliderValue) { _, newValue in
+                guard !isSyncing else { return }
+                airPlayManager.setVolume(Int(newValue), for: deviceID)
+            }
     }
 }
 

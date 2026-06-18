@@ -118,6 +118,7 @@ final class ExtensionLockScreenWidgetManager: ObservableObject {
         if previousCount != activeWidgets.count {
             Logger.log("Dismissed extension widget \(widgetID) from \(bundleIdentifier)", category: .extensions)
             ExtensionXPCServiceHost.shared.notifyWidgetDismiss(bundleIdentifier: bundleIdentifier, widgetID: widgetID)
+            ExtensionRPCServer.shared.notifyWidgetDismiss(bundleIdentifier: bundleIdentifier, widgetID: widgetID)
             logDiagnostics("Removed lock screen widget \(widgetID) for \(bundleIdentifier); remaining: \(activeWidgets.count)")
             broadcastSnapshot()
         }
@@ -128,7 +129,10 @@ final class ExtensionLockScreenWidgetManager: ObservableObject {
             .filter { $0.bundleIdentifier == bundleIdentifier }
             .map { $0.descriptor.id }
         activeWidgets.removeAll { $0.bundleIdentifier == bundleIdentifier }
-        ids.forEach { ExtensionXPCServiceHost.shared.notifyWidgetDismiss(bundleIdentifier: bundleIdentifier, widgetID: $0) }
+        ids.forEach {
+            ExtensionXPCServiceHost.shared.notifyWidgetDismiss(bundleIdentifier: bundleIdentifier, widgetID: $0)
+            ExtensionRPCServer.shared.notifyWidgetDismiss(bundleIdentifier: bundleIdentifier, widgetID: $0)
+        }
         if !ids.isEmpty {
             logDiagnostics("Removed all lock screen widgets for \(bundleIdentifier); ids: \(ids.joined(separator: ", "))")
             broadcastSnapshot()

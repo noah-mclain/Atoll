@@ -36,6 +36,26 @@ struct ShelfDropService {
 
         return results
     }
+
+    static func items(from fileURLs: [URL]) async -> [ShelfItem] {
+        var results: [ShelfItem] = []
+        let fileManager = FileManager.default
+
+        for fileURL in fileURLs {
+            let resolvedURL = fileURL.standardizedFileURL
+            guard resolvedURL.isFileURL else { continue }
+            guard fileManager.fileExists(atPath: resolvedURL.path) else {
+                NSLog("⚠️ Ignoring non-existent file URL: \(resolvedURL.path)")
+                continue
+            }
+
+            if let bookmark = createBookmark(for: resolvedURL) {
+                results.append(await ShelfItem(kind: .file(bookmark: bookmark), isTemporary: false))
+            }
+        }
+
+        return results
+    }
     
     private static func processProvider(_ provider: NSItemProvider) async -> ShelfItem? {
         if let actualFileURL = await provider.extractFileURL() {
@@ -81,4 +101,3 @@ struct ShelfDropService {
         return (try? Bookmark(url: url))?.data
     }
 }
-

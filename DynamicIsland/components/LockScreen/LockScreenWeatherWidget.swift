@@ -821,8 +821,8 @@ struct LockScreenWeatherWidget: View {
 		let now = currentTime
 
 		if event.isAllDay {
-			return "All day • \(event.title)"
-		}
+            return "\(String(format: String(localized: "All-day"))) • \(event.title)"
+        }
 
 		let timeString = event.start.formatted(date: .omitted, time: .shortened)
 
@@ -832,8 +832,8 @@ struct LockScreenWeatherWidget: View {
 			if lockScreenShowCalendarTimeRemaining {
 				let secondsLeft = event.end.timeIntervalSince(now)
 				let minutesLeft = max(0, Int(ceil(secondsLeft / 60.0)))
-				suffix = " • \(countdownText(fromMinutes: minutesLeft)) left"
-			} else {
+                suffix = " • \(String(format: String(localized: "%@ left"), countdownText(fromMinutes: minutesLeft)))"
+            } else {
 				suffix = ""
 			}
 			return "\(leading)\(event.title)\(suffix)"
@@ -845,7 +845,7 @@ struct LockScreenWeatherWidget: View {
 
 		let secondsUntilStart = event.start.timeIntervalSince(now)
 		let totalMinutes = max(0, Int(ceil(secondsUntilStart / 60.0)))
-		return "\(timeString) • \(event.title) • in \(countdownText(fromMinutes: totalMinutes))"
+        return "\(timeString) • \(event.title) • \(String(format: String(localized: "in %@"), (countdownText(fromMinutes: totalMinutes))))"
 	}
 
 	private func countdownText(fromMinutes minutes: Int) -> String {
@@ -853,12 +853,13 @@ struct LockScreenWeatherWidget: View {
 			return "\(minutes)m"
 		}
 
-		let hours = minutes / 60
+        let hours = String(format: String(localized: "%lldh"), minutes / 60)
 		let mins = minutes % 60
+        let minStr = String(format: String(localized: "%lldm"), minutes % 60)
 		if mins == 0 {
-			return "\(hours)h"
+			return "\(hours)"
 		}
-		return "\(hours)h \(mins)m"
+		return "\(hours) \(minStr)"
 	}
 
 	private var sunriseTimeText: String? {
@@ -1261,7 +1262,15 @@ struct LockScreenWeatherWidget: View {
 
 	private func chargingStatusFallback(for info: LockScreenWeatherSnapshot.ChargingInfo) -> String {
 		if info.isPluggedIn && !info.isCharging {
-			return NSLocalizedString("Fully charged", comment: "Charging fallback label when already charged")
+			let level = info.batteryLevel.map(clampedBatteryLevel)
+			if level == 100 {
+				return NSLocalizedString("Fully charged", comment: "Charging fallback label when already charged")
+			}
+			if let level {
+				let onHold = NSLocalizedString("On hold", comment: "Plugged in but charging is paused by the system")
+				return "\(level)% • \(onHold)"
+			}
+			return NSLocalizedString("On hold", comment: "Plugged in but charging is paused by the system")
 		}
 		return NSLocalizedString("Charging", comment: "Charging fallback label when no estimate is available")
 	}
@@ -1456,7 +1465,17 @@ struct LockScreenWeatherWidget: View {
 		}
 
 		if charging.isPluggedIn && !charging.isCharging {
-			return NSLocalizedString("Battery fully charged", comment: "Battery is full")
+			let level = charging.batteryLevel.map(clampedBatteryLevel)
+			if level == 100 {
+				return NSLocalizedString("Battery fully charged", comment: "Battery is full")
+			}
+			if let level {
+				return String(
+					format: NSLocalizedString("Battery at %d percent, charging on hold", comment: "Plugged in but charging is paused by the system"),
+					level
+				)
+			}
+			return NSLocalizedString("Charging on hold", comment: "Plugged in but charging is paused by the system")
 		}
 
 		if snapshot.showsChargingPercentage, let level = charging.batteryLevel {

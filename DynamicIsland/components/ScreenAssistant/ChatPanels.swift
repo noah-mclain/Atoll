@@ -203,6 +203,25 @@ struct ChatMessagesView: View {
                     .foregroundColor(.primary)
                 
                 Spacer()
+
+                Button(action: {
+                    screenAssistantManager.resetConversationContext()
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.caption)
+                        Text("Reset Context")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.gray.opacity(0.12))
+                    .cornerRadius(8)
+                }
+                .disabled(screenAssistantManager.isLoading)
+                .buttonStyle(PlainButtonStyle())
+                .help("Clear conversation and attachments")
                 
                 Button(action: {
                     screenAssistantManager.closePanels()
@@ -431,6 +450,7 @@ struct ChatInputView: View {
         case .openai: return "brain.head.profile"
         case .claude: return "doc.text"
         case .local: return "server.rack"
+        case .groq: return "bolt.fill"
         }
     }
     
@@ -453,6 +473,8 @@ struct ChatInputView: View {
         case .local:
             // Local models don't need API keys
             apiKey = "local"
+        case .groq:
+            apiKey = Defaults[.groqApiKey]
         }
         
         if apiKey.isEmpty {

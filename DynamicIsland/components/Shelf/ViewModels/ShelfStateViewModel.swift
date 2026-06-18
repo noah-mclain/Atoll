@@ -28,7 +28,10 @@ final class ShelfStateViewModel: ObservableObject {
     static let shared = ShelfStateViewModel()
 
     @Published private(set) var items: [ShelfItem] = [] {
-        didSet { ShelfPersistenceService.shared.save(items) }
+        didSet {
+            ShelfPersistenceService.shared.save(items)
+            ShelfSelectionModel.shared.reconcileSelection(with: items)
+        }
     }
 
     @Published var isLoading: Bool = false
@@ -49,19 +52,25 @@ final class ShelfStateViewModel: ObservableObject {
         var merged = items
         // Deduplicate by identityKey while preserving order (existing first)
         var seen: Set<String> = Set(merged.map { $0.identityKey })
+        var addedIDs: [String] = []
         for it in newItems {
             let key = it.identityKey
             if !seen.contains(key) {
                 merged.append(it)
                 seen.insert(key)
+                addedIDs.append(it.id.uuidString)
             }
         }
         items = merged
+        if !addedIDs.isEmpty {
+            ExtensionRPCServer.shared.notifyShelfItemsChanged(itemIDs: addedIDs, action: "added")
+        }
     }
 
     func remove(_ item: ShelfItem) {
         item.cleanupStoredData()
         items.removeAll { $0.id == item.id }
+        ExtensionRPCServer.shared.notifyShelfItemsChanged(itemIDs: [item.id.uuidString], action: "removed")
     }
 
     func updateBookmark(for item: ShelfItem, bookmark: Data) {

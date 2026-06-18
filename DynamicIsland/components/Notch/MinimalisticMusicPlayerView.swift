@@ -83,12 +83,14 @@ struct MinimalisticMusicPlayerView: View {
 
                         VStack(alignment: .leading, spacing: 1) {
                             if !musicManager.songTitle.isEmpty {
-                                MarqueeText(
-                                    $musicManager.songTitle,
+                                MusicTitleMarqueeView(
+                                    text: musicManager.songTitle,
+                                    isExplicit: musicManager.isCurrentTrackExplicit,
                                     font: .system(size: 12, weight: .semibold),
                                     nsFont: .subheadline,
                                     textColor: .white,
-                                    frameWidth: textWidth
+                                    frameWidth: textWidth,
+                                    badgeHeight: 13
                                 )
                             }
 
@@ -111,6 +113,7 @@ struct MinimalisticMusicPlayerView: View {
                 // Compact progress bar
                 progressBar
                     .padding(.top, 6)
+                    .clipped()
                 
                 // Compact playback controls
                 if shouldShowControlHUDRow {
@@ -131,7 +134,7 @@ struct MinimalisticMusicPlayerView: View {
                 reminderList
             }
             .padding(.horizontal, 12)
-            .padding(.top, -15)
+            .padding(.top, 6)
             .padding(.bottom, ReminderLiveActivityManager.baselineMinimalisticBottomPadding)
             .frame(maxWidth: .infinity)
             .frame(height: calculateDynamicHeight(), alignment: .top)
@@ -252,7 +255,7 @@ struct MinimalisticMusicPlayerView: View {
         height += 6 + 4 // progress bar + top padding
 
         // Add playback controls height
-        height += 40 + 2 // controls + top padding
+        height += 54 + 2 // controls + top padding
 
         // Add lyrics height if enabled in settings (reserve space even while loading)
         if enableLyrics {
@@ -374,7 +377,7 @@ struct MinimalisticMusicPlayerView: View {
 private struct MinimalisticReminderEventListView: View {
     let reminders: [ReminderLiveActivityManager.ReminderEntry]
 
-    private let textFont = Font.system(size: 13, weight: .semibold)
+    private let textFont = Font.system(size: 13, weight: .regular)
     private let separatorSpacing: CGFloat = 10
 
     var body: some View {
@@ -640,7 +643,7 @@ private struct MinimalisticReminderDetailsView: View {
         Rectangle()
             .fill(Defaults[.coloredSpectrogram] ? Color(nsColor: MusicManager.shared.avgColor).gradient : Color.gray.gradient)
             .mask {
-                AudioSpectrumView(isPlaying: .constant(MusicManager.shared.isPlaying))
+                AudioVisualizerView(isPlaying: .constant(MusicManager.shared.isPlaying))
                     .frame(width: 20, height: 16)
             }
             .frame(width: 20, height: 16)
@@ -662,7 +665,6 @@ private struct MinimalisticReminderDetailsView: View {
     private var progressBar: some View {
         TimelineView(
             .animation(
-                minimumInterval: 1.0,
                 paused: isProgressTimelinePaused
             )
         ) { timeline in
@@ -704,7 +706,7 @@ private struct MinimalisticReminderDetailsView: View {
     // MARK: - Playback Controls (Larger)
     
     private var playbackControls: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 10) {
             ForEach(Array(displayedSlots.enumerated()), id: \.offset) { _, slot in
                 slotView(for: slot)
             }
@@ -832,10 +834,10 @@ private struct MinimalisticReminderDetailsView: View {
     private var playPauseButton: some View {
         MinimalisticSquircircleButton(
             icon: musicManager.isPlaying ? (musicManager.isLiveStream ? "stop.fill" : "pause.fill") : "play.fill",
-            fontSize: 28,
+            fontSize: 26,
             fontWeight: .semibold,
-            frameSize: CGSize(width: 60, height: 60),
-            cornerRadius: 24,
+            frameSize: CGSize(width: 54, height: 54),
+            cornerRadius: 22,
             foregroundColor: .white,
             pressEffect: .none,
             symbolEffectStyle: .replace,
@@ -865,8 +867,8 @@ private struct MinimalisticReminderDetailsView: View {
             icon: icon,
             fontSize: size,
             fontWeight: .medium,
-            frameSize: CGSize(width: 40, height: 40),
-            cornerRadius: 16,
+            frameSize: CGSize(width: 36, height: 36),
+            cornerRadius: 14,
             foregroundColor: isActive ? resolvedActiveColor : .white.opacity(0.85),
             pressEffect: pressEffect,
             symbolEffectStyle: symbolEffect,
@@ -876,9 +878,13 @@ private struct MinimalisticReminderDetailsView: View {
         )
     }
 
+    private var isAppleMusicActive: Bool {
+        musicManager.bundleIdentifier == "com.apple.Music"
+    }
+
     private var displayedSlots: [MusicControlButton] {
         if showCustomControls {
-            let normalized = slotConfig.normalized(allowingMediaOutput: showMediaOutputControl)
+            let normalized = slotConfig.normalized(allowingMediaOutput: showMediaOutputControl, isAppleMusicActive: isAppleMusicActive)
             return normalized.contains(where: { $0 != .none }) ? normalized : MusicControlButton.defaultLayout
         }
 
@@ -943,6 +949,8 @@ private struct MinimalisticReminderDetailsView: View {
             }
         case .mediaOutput:
             MinimalisticMediaOutputButton()
+        case .airPlay:
+            MinimalisticAirPlayButton()
         case .lyrics:
             controlButton(
                 icon: enableLyrics ? "quote.bubble.fill" : "quote.bubble",
@@ -983,8 +991,8 @@ private struct MinimalisticReminderDetailsView: View {
                 icon: routeManager.activeDevice?.iconName ?? "speaker.wave.2",
                 fontSize: 18,
                 fontWeight: .medium,
-                frameSize: CGSize(width: 40, height: 40),
-                cornerRadius: 16,
+                frameSize: CGSize(width: 36, height: 36),
+                cornerRadius: 14,
                 foregroundColor: .white.opacity(0.85),
                 symbolEffectStyle: .replace
             ) {
@@ -1027,6 +1035,70 @@ private struct MinimalisticReminderDetailsView: View {
         }
     }
 
+    private struct MinimalisticAirPlayButton: View {
+        @ObservedObject private var musicManager = MusicManager.shared
+        @ObservedObject private var airPlayManager = AppleMusicAirPlayManager.shared
+        @EnvironmentObject private var vm: DynamicIslandViewModel
+        @State private var isPopoverPresented = false
+        @State private var isHoveringPopover = false
+
+        private var isAppleMusicActive: Bool {
+            musicManager.bundleIdentifier == "com.apple.Music"
+        }
+
+        var body: some View {
+            MinimalisticSquircircleButton(
+                icon: "airplayaudio",
+                fontSize: 18,
+                fontWeight: .medium,
+                frameSize: CGSize(width: 36, height: 36),
+                cornerRadius: 14,
+                foregroundColor: .white.opacity(0.85),
+                symbolEffectStyle: .replace
+            ) {
+                isPopoverPresented.toggle()
+                if isPopoverPresented {
+                    Task { await airPlayManager.refreshDevices() }
+                }
+            }
+            .accessibilityLabel("AirPlay")
+            .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
+                AirPlaySelectorPopover(
+                    airPlayManager: airPlayManager,
+                    onHoverChanged: { hovering in
+                        isHoveringPopover = hovering
+                        updateActivity()
+                    }
+                ) {
+                    isPopoverPresented = false
+                    isHoveringPopover = false
+                    updateActivity()
+                }
+            }
+            .onChange(of: isPopoverPresented) { _, presented in
+                if !presented { isHoveringPopover = false }
+                updateActivity()
+            }
+            .onAppear {
+                if isAppleMusicActive {
+                    Task { await airPlayManager.refreshDevices() }
+                }
+            }
+            .onChange(of: musicManager.bundleIdentifier) { _, newBundle in
+                if newBundle == "com.apple.Music" {
+                    Task { await airPlayManager.refreshDevices() }
+                }
+            }
+            .onDisappear {
+                vm.isMediaOutputPopoverActive = false
+            }
+        }
+
+        private func updateActivity() {
+            vm.isMediaOutputPopoverActive = isPopoverPresented && isHoveringPopover
+        }
+    }
+
     private var repeatIcon: String {
         switch musicManager.repeatMode {
         case .off: return "repeat"
@@ -1041,7 +1113,16 @@ private struct MinimalisticReminderDetailsView: View {
 struct MinimalisticAlbumArtView: View {
     @ObservedObject var musicManager = MusicManager.shared
     @ObservedObject var vm: DynamicIslandViewModel
+    @Default(.showLiveCanvasInDynamicIsland) private var showLiveCanvasInDynamicIsland
     let albumArtNamespace: Namespace.ID
+
+    private var usesLiveCanvasArtwork: Bool {
+        showLiveCanvasInDynamicIsland && musicManager.videoArtworkURL != nil
+    }
+
+    private var albumArtCornerRadius: CGFloat {
+        musicManager.albumArt.size.width / musicManager.albumArt.size.height > 1.0 ? 4 : 12
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -1056,34 +1137,45 @@ struct MinimalisticAlbumArtView: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .background(
-                Image(nsImage: musicManager.albumArt)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                DynamicIslandArtworkSourceView(
+                    cornerRadius: albumArtCornerRadius,
+                    contentMode: .fill
+                )
             )
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .scaleEffect(x: 1.3, y: 1.4)
+            .clipShape(RoundedRectangle(cornerRadius: albumArtCornerRadius))
+            .scaleEffect(x: 1.04, y: 1.05)
             .rotationEffect(.degrees(92))
-            .blur(radius: 35)
-            .opacity(min(0.6, 1 - max(musicManager.albumArt.getBrightness(), 0.3)))
+            .blur(radius: 14)
+            .opacity(
+                usesLiveCanvasArtwork
+                    ? (musicManager.isPlaying ? 0.35 : 0.12)
+                    : min(0.28, 1 - max(musicManager.albumArt.getBrightness(), 0.3))
+            )
+            .shadow(
+                color: Color(nsColor: musicManager.avgColor).opacity(usesLiveCanvasArtwork ? 0.14 : 0.08),
+                radius: usesLiveCanvasArtwork ? 6 : 4,
+                x: 0,
+                y: 0
+            )
     }
     
     private var albumArtButton: some View {
         Button {
             musicManager.openMusicApp()
         } label: {
-            Color.clear
-                .aspectRatio(1, contentMode: .fit)
-                .background(
-                    Image(nsImage: musicManager.albumArt)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                )
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .matchedGeometryEffect(id: "albumArt", in: albumArtNamespace)
-                .albumArtFlip(angle: musicManager.flipAngle)
-                .parallax3D(magnitude: 12)
+                Color.clear
+                    .aspectRatio(1, contentMode: .fit)
+                    .background(
+                        DynamicIslandArtworkSourceView(
+                            cornerRadius: albumArtCornerRadius,
+                            contentMode: .fit
+                        )
+                    )
+                    .clipped()
+                    .matchedGeometryEffect(id: "albumArt", in: albumArtNamespace)
+                    .albumArtFlip(angle: musicManager.flipAngle)
+                    .parallax3D()
         }
         .buttonStyle(PlainButtonStyle())
         .opacity(musicManager.isPlaying ? 1 : 0.4)

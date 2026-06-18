@@ -120,6 +120,7 @@ class ScreenAssistantManager: NSObject, ObservableObject {
     
     private var audioRecorder: AVAudioRecorder?
     private var recordingTimer: Timer?
+    private var activeRequest: URLSessionTask?
     
     // Panel management
     private var chatMessagesPanel: ChatMessagesPanel?
@@ -396,6 +397,8 @@ class ScreenAssistantManager: NSObject, ObservableObject {
             sendToClaudeAPI(message: message, files: files)
         case .local:
             sendToLocalAPI(message: message, files: files)
+        case .groq:
+            sendToGroqAPI(message: message, files: files)
         }
     }
     
@@ -443,6 +446,40 @@ class ScreenAssistantManager: NSObject, ObservableObject {
         }
         
         performOpenAIRequest(url: url, requestBody: buildOpenAIRequestBody(message: message, files: files, model: modelId), apiKey: apiKey)
+    }
+
+    private func sendToGroqAPI(message: String, files: [ScreenAssistantFile]) {
+        let apiKey = Defaults[.groqApiKey]
+        guard !apiKey.isEmpty else {
+            print("❌ ScreenAssistant: No Groq API key configured")
+            addAssistantMessage("Error: No Groq API key configured. Please set your API key in model settings.")
+            isLoading = false
+            return
+        }
+        
+        // Get selected model or default to llama-3.3-70b-versatile
+        let selectedModel = Defaults[.selectedAIModel]
+        let modelId: String
+        if let selectedId = selectedModel?.id,
+           AIModelProvider.groq.supportedModels.contains(where: { $0.id == selectedId }) {
+            modelId = selectedId
+        } else {
+            modelId = "llama-3.3-70b-versatile"
+        }
+        
+        guard let url = URL(string: "https://api.groq.com/openai/v1/chat/completions") else {
+            print("❌ ScreenAssistant: Invalid Groq API URL")
+            addAssistantMessage("Error: Invalid API URL")
+            isLoading = false
+            return
+        }
+        
+        performOpenAIRequest(
+            url: url,
+            requestBody: buildOpenAIRequestBody(message: message, files: files, model: modelId),
+            apiKey: apiKey,
+            provider: .groq
+        )
     }
     
     private func sendToClaudeAPI(message: String, files: [ScreenAssistantFile]) {
@@ -661,17 +698,27 @@ class ScreenAssistantManager: NSObject, ObservableObject {
             return
         }
         
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                guard let currentTask = task else { return }
+                
+                // Ensure this callback belongs to the current in-flight request
+                guard self.activeRequest === currentTask else { return }
+                
+                self.isLoading = false
+                self.activeRequest = nil
+                
                 self.handleResponse(data: data, response: response, error: error, provider: provider)
             }
         }
         
-        task.resume()
+        activeRequest = task
+        task?.resume()
     }
     
-    private func performOpenAIRequest(url: URL, requestBody: [String: Any], apiKey: String) {
+    private func performOpenAIRequest(url: URL, requestBody: [String: Any], apiKey: String, provider: AIModelProvider = .openai) {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -687,14 +734,24 @@ class ScreenAssistantManager: NSObject, ObservableObject {
             return
         }
         
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                self.handleResponse(data: data, response: response, error: error, provider: .openai)
+                guard let currentTask = task else { return }
+                
+                // Ensure this callback belongs to the current in-flight request
+                guard self.activeRequest === currentTask else { return }
+                
+                self.isLoading = false
+                self.activeRequest = nil
+                
+                self.handleResponse(data: data, response: response, error: error, provider: provider)
             }
         }
         
-        task.resume()
+        activeRequest = task
+        task?.resume()
     }
     
     private func performClaudeRequest(url: URL, requestBody: [String: Any], apiKey: String) {
@@ -714,20 +771,34 @@ class ScreenAssistantManager: NSObject, ObservableObject {
             return
         }
         
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                guard let currentTask = task else { return }
+                
+                // Ensure this callback belongs to the current in-flight request
+                guard self.activeRequest === currentTask else { return }
+                
+                self.isLoading = false
+                self.activeRequest = nil
+                
                 self.handleResponse(data: data, response: response, error: error, provider: .claude)
             }
         }
         
-        task.resume()
+        activeRequest = task
+        task?.resume()
     }
     
     // MARK: - Response Handlers
     
     private func handleResponse(data: Data?, response: URLResponse?, error: Error?, provider: AIModelProvider) {
-        isLoading = false
+        // Check if the request was cancelled (e.g., by resetConversationContext)
+        if let error = error as? NSError, error.code == NSURLErrorCancelled {
+            print("ℹ️ ScreenAssistant: Request was cancelled")
+            return
+        }
         
         if let error = error {
             print("❌ ScreenAssistant: Network error - \(error)")
@@ -755,7 +826,7 @@ class ScreenAssistantManager: NSObject, ObservableObject {
         switch provider {
         case .gemini:
             parseGeminiResponse(data: data)
-        case .openai:
+        case .openai, .groq:
             parseOpenAIResponse(data: data)
         case .claude:
             parseClaudeResponse(data: data)
@@ -1103,7 +1174,17 @@ class ScreenAssistantManager: NSObject, ObservableObject {
     }
     
     func clearChat() {
+        resetConversationContext()
+    }
+
+    func resetConversationContext() {
+        // Cancel any in-flight request
+        activeRequest?.cancel()
+        activeRequest = nil
+        
+        isLoading = false
         chatMessages.removeAll()
+        clearAllFiles()
     }
     
     private func addAssistantMessage(_ content: String) {

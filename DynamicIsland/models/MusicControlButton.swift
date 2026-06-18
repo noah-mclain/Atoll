@@ -29,6 +29,7 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
     case trackForward
     case repeatMode
     case mediaOutput
+    case airPlay
     case lyrics
     case seekBackward
     case seekForward
@@ -61,33 +62,41 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
         .shuffle,
         .repeatMode,
         .lyrics,
-        .mediaOutput
+        .mediaOutput,
+        .airPlay
     ]
+
+    /// Controls that are only available when Apple Music is the active media source.
+    var isAppleMusicExclusive: Bool {
+        self == .airPlay
+    }
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .shuffle:
-            return "Shuffle"
+            return String(localized: "Shuffle")
         case .trackBackward:
-            return "Previous Track"
+            return String(localized: "Previous Track")
         case .playPause:
-            return "Play / Pause"
+            return String(localized: "Play / Pause")
         case .trackForward:
-            return "Next Track"
+            return String(localized: "Next Track")
         case .repeatMode:
-            return "Repeat"
+            return String(localized: "Repeat")
         case .mediaOutput:
-            return "Change Media Output"
+            return String(localized: "Change Media Output")
+        case .airPlay:
+            return String(localized: "AirPlay")
         case .lyrics:
-            return "Lyrics"
+            return String(localized: "Lyrics")
         case .seekBackward:
-            return "Rewind 10s"
+            return String(localized: "Rewind 10s")
         case .seekForward:
-            return "Forward 10s"
+            return String(localized: "Forward 10s")
         case .none:
-            return "Empty Slot"
+            return String(localized: "Empty Slot")
         }
     }
 
@@ -105,6 +114,8 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
             return "repeat"
         case .mediaOutput:
             return "speaker.wave.2"
+        case .airPlay:
+            return "airplayaudio"
         case .lyrics:
             return "quote.bubble"
         case .seekBackward:
@@ -122,11 +133,10 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
 }
 
 extension Array where Element == MusicControlButton {
-    func normalized(allowingMediaOutput: Bool) -> [MusicControlButton] {
+    func normalized(allowingMediaOutput: Bool, isAppleMusicActive: Bool = true) -> [MusicControlButton] {
         var sanitized = map { button -> MusicControlButton in
-            if button == .mediaOutput && !allowingMediaOutput {
-                return .none
-            }
+            if button == .mediaOutput && !allowingMediaOutput { return .none }
+            if button.isAppleMusicExclusive && !isAppleMusicActive { return .none }
             return button
         }
 

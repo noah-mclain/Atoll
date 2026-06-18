@@ -373,6 +373,9 @@ struct ExtensionWebContentView: NSViewRepresentable {
                 return true
             }
             if (scheme == "http" || scheme == "https") {
+                if allowsRemoteRequests() {
+                    return true
+                }
                 guard descriptor.allowLocalhostRequests else {
                     return false
                 }
@@ -380,6 +383,15 @@ struct ExtensionWebContentView: NSViewRepresentable {
                 return host == "localhost" || host == "127.0.0.1"
             }
             return false
+        }
+
+        private func allowsRemoteRequests() -> Bool {
+            guard let data = try? JSONEncoder().encode(descriptor),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let value = json["allowRemoteRequests"] as? Bool else {
+                return false
+            }
+            return value
         }
     }
 }

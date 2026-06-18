@@ -111,6 +111,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let mediaControlsStateCoordinator = MediaControlsStateCoordinator.shared
     let systemTimerBridge = SystemTimerBridge.shared
     let extensionXPCServiceHost = ExtensionXPCServiceHost.shared
+    let extensionRPCServer = ExtensionRPCServer.shared
     var closeNotchWorkItem: DispatchWorkItem?
     private var previousScreens: [NSScreen]?
     private var onboardingWindowController: NSWindowController?
@@ -153,12 +154,105 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         installTopMenuItemsIfNeeded()
     }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        _ = handleIncomingShelfURLs(urls)
+    }
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        handleIncomingShelfURLs([URL(fileURLWithPath: filename)])
+    }
+
+    private func handleIncomingShelfURLs(_ urls: [URL]) -> Bool {
+        let fileURLs = urls.filter(\.isFileURL)
+        guard !fileURLs.isEmpty else { return false }
+
+        Task { @MainActor [weak self] in
+            let items = await ShelfDropService.items(from: fileURLs)
+            guard !items.isEmpty else { return }
+
+            ShelfStateViewModel.shared.add(items)
+            self?.coordinator.currentView = .shelf
+        }
+
+        return true
+    }
+    
+    /// Setup observers for music player state changes to restart AudioTap capture
+    private func setupAudioTapMusicObservers() {
+        // Listen for app launches to restart capture when music apps are opened
+        let targetBundleIDs = [
+            "com.apple.Music",
+            "com.spotify.client",
+            "com.amazon.music",
+            "com.apple.Safari",
+            "com.tidal.desktop",
+            "tv.plex.plexamp",
+            "com.roon.Roon",
+            "com.audirvana.Audirvana-Studio",
+            "com.vox.vox",
+            "com.coppertino.Vox",
+        ]
+        
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundleID = app.bundleIdentifier,
+                  targetBundleIDs.contains(bundleID) else { return }
+            
+            // A target music app was launched, restart capture to include it
+            if Defaults[.enableRealTimeWaveform] {
+                print("🎵 [AudioTap] Music app launched: \(bundleID), restarting capture...")
+                // Give the app a moment to fully launch
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    AudioTap.shared.restartCapture()
+                }
+            }
+        }
+        
+        // Also observe app terminations to restart capture
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundleID = app.bundleIdentifier,
+                  targetBundleIDs.contains(bundleID) else { return }
+            
+            // A target music app was terminated, restart capture to update the list
+            if Defaults[.enableRealTimeWaveform] {
+                print("🎵 [AudioTap] Music app terminated: \(bundleID), restarting capture...")
+                AudioTap.shared.restartCapture()
+            }
+        }
+    }
     
     func applicationWillTerminate(_ notification: Notification) {
+        let userInfo: [String: Any] = [
+            AtollDistributedNotifications.UserInfoKey.sourcePID: NSNumber(value: ProcessInfo.processInfo.processIdentifier)
+        ]
+        DistributedNotificationCenter.default().postNotificationName(
+            AtollDistributedNotifications.didBecomeIdle,
+            object: nil,
+            userInfo: userInfo,
+            deliverImmediately: true
+        )
+
         // Cancel any pending window size updates
         windowSizeUpdateWorkItem?.cancel()
         NotificationCenter.default.removeObserver(self)
         extensionXPCServiceHost.stop()
+        extensionRPCServer.stop()
+        
+        // Stop AudioTap capture
+        AudioTap.shared.stopCapture()
+
+        // Restore Lunar's native OSD if integration was active
+        LunarManager.shared.appWillTerminate()
     }
     
     @objc func onScreenLocked(_: Notification) {
@@ -207,13 +301,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func cleanupWindows(shouldInvert: Bool = false) {
         if shouldInvert ? !Defaults[.showOnAllDisplays] : Defaults[.showOnAllDisplays] {
-            for window in windows.values {
+            for (screen, window) in windows {
+                // Tear down the hosted ContentView before dropping the window
+                // (`.onDisappear` is unreliable for borderless panels).
+                viewModels[screen]?.onViewTeardown?()
+                viewModels[screen]?.onViewTeardown = nil
                 window.close()
                 NotchSpaceManager.shared.notchSpace.windows.remove(window)
             }
             windows.removeAll()
             viewModels.removeAll()
         } else if let window = window {
+            vm.onViewTeardown?()
+            vm.onViewTeardown = nil
             window.close()
             NotchSpaceManager.shared.notchSpace.windows.remove(window)
             self.window = nil
@@ -300,6 +400,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Album art (~32) + Middle section (380) + Visualizer (~32) + horizontal padding (28) + clip shape margin (12)
             let inlineSneakPeekWidth: CGFloat = 460
             return CGSize(width: inlineSneakPeekWidth, height: vm.effectiveClosedNotchHeight)
+        }
+
+        // Check for battery HUD expansion
+        if vm.notchState == .closed && 
+           coordinator.expandingView.show && 
+           coordinator.expandingView.type == .battery &&
+           Defaults[.showPowerStatusNotifications] {
+            
+            let batteryModel = BatteryStatusViewModel.shared
+            if let kind = batteryModel.activeTemporaryHUDKind {
+                let closedNotchHeight = vm.effectiveClosedNotchHeight
+                let closedNotchWidth = vm.closedNotchSize.width
+                
+                let style: BatteryNotificationStyle = {
+                    switch kind {
+                    case .charging: return .compact
+                    case .lowBattery: return Defaults[.lowBatteryHUDStyle]
+                    case .fullBattery: return Defaults[.fullBatteryHUDStyle]
+                    }
+                }()
+                
+                var width = closedNotchWidth
+                var height = closedNotchHeight
+                
+                switch (kind, style) {
+                case (.charging, _), (.lowBattery, .compact), (.fullBattery, .compact):
+                    width += 180
+                case (.lowBattery, .standard):
+                    width += 100
+                    height += 75
+                case (.fullBattery, .standard):
+                    width += 80
+                    height += 70
+                }
+                
+                return addShadowPadding(to: CGSize(width: width, height: height), isMinimalistic: Defaults[.enableMinimalisticUI])
+            }
         }
         
         // Use minimalistic or normal size based on settings
@@ -388,15 +525,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let userInfo: [String: Any] = [
+            AtollDistributedNotifications.UserInfoKey.sourcePID: NSNumber(value: ProcessInfo.processInfo.processIdentifier)
+        ]
+        DistributedNotificationCenter.default().postNotificationName(
+            AtollDistributedNotifications.didBecomeActive,
+            object: nil,
+            userInfo: userInfo,
+            deliverImmediately: true
+        )
+
         LockScreenLiveActivityWindowManager.shared.configure(viewModel: vm)
         LockScreenManager.shared.configure(viewModel: vm)
         extensionXPCServiceHost.start()
+        extensionRPCServer.start()
         
         // Migrate legacy progress bar settings
         Defaults.Keys.migrateProgressBarStyle()
         Defaults.Keys.migrateMusicAuxControls()
         Defaults.Keys.migrateMusicControlSlots()
         Defaults.Keys.migrateCapsLockTintMode()
+        Defaults.Keys.migrateThirdPartyDDCIntegration()
+
+        Defaults.publisher(.enableThirdPartyDDCIntegration, options: [])
+            .sink { _ in
+                Defaults.Keys.syncLegacyThirdPartyDDCKeys()
+            }
+            .store(in: &cancellables)
+
+        Defaults.publisher(.thirdPartyDDCProvider, options: [])
+            .sink { _ in
+                Defaults.Keys.syncLegacyThirdPartyDDCKeys()
+            }
+            .store(in: &cancellables)
         
         // Initialize idle animations (load bundled + built-in face)
         idleAnimationManager.initializeDefaultAnimations()
@@ -415,6 +576,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Setup BetterDisplay integration
         BetterDisplayManager.shared.configure(coordinator: coordinator)
+
+        // Setup Lunar integration
+        LunarManager.shared.configure(coordinator: coordinator)
         
         // Setup ScreenRecording Manager
         if Defaults[.enableScreenRecordingDetection] {
@@ -428,6 +592,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Setup Privacy Indicator Manager (camera and microphone monitoring)
         PrivacyIndicatorManager.shared.startMonitoring()
+        
+        // Setup Real-time Audio Waveform capture if enabled
+        if Defaults[.enableRealTimeWaveform] {
+            Task {
+                await AudioTap.shared.startCapture()
+            }
+            setupAudioTapMusicObservers()
+        }
+        
+        // Observe enableRealTimeWaveform changes
+        Defaults.publisher(.enableRealTimeWaveform, options: [])
+            .sink { [weak self] change in
+                if change.newValue {
+                    Task {
+                        await AudioTap.shared.startCapture()
+                    }
+                    self?.setupAudioTapMusicObservers()
+                } else {
+                    AudioTap.shared.stopCapture()
+                }
+            }
+            .store(in: &cancellables)
         
         // Observe tab changes - use immediate resize to keep the notch pinned
         // Deferred to next run loop tick because @Published fires on willSet,
@@ -787,6 +973,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         permissionsMenuItem.submenu = permissionsSubmenu
         mainMenu.insertItem(permissionsMenuItem, at: insertionIndex + 2)
 
+        let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
+        toolsMenuItem.identifier = NSUserInterfaceItemIdentifier("Atoll.Tools.Menu")
+        let toolsSubmenu = NSMenu(title: "Tools")
+
+        let loggingLevelItem = NSMenuItem(title: "Logging Level", action: nil, keyEquivalent: "")
+        let loggingLevelSubmenu = NSMenu(title: "Logging Level")
+        
+        let levels: [(String, LogLevel)] = [
+            ("No Logging", .none),
+            ("Error", .error),
+            ("Warning", .warning),
+            ("Info", .info),
+            ("Debug", .debug)
+        ]
+        
+        for (title, level) in levels {
+            let item = NSMenuItem(title: title, action: #selector(setLogLevel(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = level.rawValue
+            item.state = (Defaults[.logLevel] == level) ? NSControl.StateValue.on : NSControl.StateValue.off
+            loggingLevelSubmenu.addItem(item)
+        }
+        loggingLevelItem.submenu = loggingLevelSubmenu
+        toolsSubmenu.addItem(loggingLevelItem)
+
+        toolsSubmenu.addItem(NSMenuItem.separator())
+        
+        let exportLogsItem = NSMenuItem(title: "Export Logs", action: #selector(exportLogs), keyEquivalent: "")
+        exportLogsItem.target = self
+        toolsSubmenu.addItem(exportLogsItem)
+
+        toolsMenuItem.submenu = toolsSubmenu
+        mainMenu.insertItem(toolsMenuItem, at: insertionIndex + 3)
+
         updateFocusMenuState()
     }
 
@@ -846,6 +1066,90 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func setLogLevel(_ sender: NSMenuItem) {
+        guard let level = LogLevel(rawValue: sender.tag) else { return }
+        Defaults[.logLevel] = level
+        
+        guard let mainMenu = NSApp.mainMenu,
+              let toolsItem = mainMenu.item(withTitle: "Tools"),
+              let toolsMenu = toolsItem.submenu,
+              let loggingItem = toolsMenu.items.first(where: { $0.title == "Logging Level" }),
+              let loggingSubmenu = loggingItem.submenu else { return }
+              
+        for item in loggingSubmenu.items {
+            item.state = (item.tag == level.rawValue) ? NSControl.StateValue.on : NSControl.StateValue.off
+        }
+    }
+
+    @objc private func exportLogs() {
+        let savePanel = NSSavePanel()
+        savePanel.nameFieldStringValue = "Atoll_Logs.zip"
+        savePanel.title = "Export Logs & Crash Reports"
+        
+        savePanel.begin { response in
+            guard response == .OK, let url = savePanel.url else { return }
+            
+            Task {
+                do {
+                    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                    
+                    let logsFile = tempDir.appendingPathComponent("app_logs.txt")
+                    let logProcess = Process()
+                    logProcess.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+                    logProcess.arguments = ["show", "--predicate", "subsystem == 'com.Ebullioscopic.Atoll' OR subsystem == 'com.Ebullioscopic.Atoll.dev'", "--info", "--debug", "--last", "2d"]
+                    
+                    let pipe = Pipe()
+                    logProcess.standardOutput = pipe
+                    try logProcess.run()
+                    logProcess.waitUntilExit()
+                    
+                    let logData = pipe.fileHandleForReading.readDataToEndOfFile()
+                    try logData.write(to: logsFile)
+                    
+                    let diagDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Logs/DiagnosticReports")
+                    let allFiles = (try? FileManager.default.contentsOfDirectory(at: diagDir, includingPropertiesForKeys: nil)) ?? []
+                    for file in allFiles where file.lastPathComponent.contains("Atoll") {
+                        try? FileManager.default.copyItem(at: file, to: tempDir.appendingPathComponent(file.lastPathComponent))
+                    }
+                    
+                    let sysDiagDir = URL(fileURLWithPath: "/Library/Logs/DiagnosticReports")
+                    let sysFiles = (try? FileManager.default.contentsOfDirectory(at: sysDiagDir, includingPropertiesForKeys: nil)) ?? []
+                    for file in sysFiles where file.lastPathComponent.contains("Atoll") {
+                        try? FileManager.default.copyItem(at: file, to: tempDir.appendingPathComponent(file.lastPathComponent))
+                    }
+                    
+                    let zipProcess = Process()
+                    zipProcess.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+                    zipProcess.currentDirectoryURL = tempDir
+                    let items = (try? FileManager.default.contentsOfDirectory(atPath: tempDir.path)) ?? []
+                    zipProcess.arguments = ["-r", url.path] + items
+                    
+                    try zipProcess.run()
+                    zipProcess.waitUntilExit()
+                    
+                    try? FileManager.default.removeItem(at: tempDir)
+                    
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Logs Exported"
+                        alert.informativeText = "Logs and crash reports have been successfully exported to \(url.lastPathComponent)."
+                        alert.alertStyle = .informational
+                        alert.runModal()
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Export Failed"
+                        alert.informativeText = "Failed to export logs: \(error.localizedDescription)"
+                        alert.alertStyle = .critical
+                        alert.runModal()
+                    }
+                }
+            }
+        }
+    }
+
     private func registerOptionalShortcutHandlers() {
         guard !optionalShortcutHandlersRegistered else { return }
         optionalShortcutHandlersRegistered = true
@@ -899,13 +1203,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard Defaults[.enableShortcuts], Defaults[.enableTerminalFeature] else { return }
 
             if vm.notchState == .closed {
+                closeNotchWorkItem?.cancel()
+                closeNotchWorkItem = nil
                 vm.open()
                 coordinator.currentView = .terminal
+                TerminalManager.shared.refreshTerminalAppearanceIfNeeded()
+                TerminalManager.shared.focusTerminalIfPossible()
+                TerminalManager.shared.refreshTerminalAppearanceIfNeeded()
             } else {
                 if coordinator.currentView == .terminal {
+                    coordinator.suppressHoverOpen()
+                    TerminalManager.shared.resignTerminalFirstResponderIfNeeded()
                     vm.close()
                 } else {
+                    closeNotchWorkItem?.cancel()
+                    closeNotchWorkItem = nil
                     coordinator.currentView = .terminal
+                    TerminalManager.shared.refreshTerminalAppearanceIfNeeded()
+                    TerminalManager.shared.focusTerminalIfPossible()
+                    TerminalManager.shared.refreshTerminalAppearanceIfNeeded()
                 }
             }
         }
@@ -989,6 +1305,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             for screen in windows.keys where !currentScreens.contains(screen) {
                 if let window = windows[screen] {
+                    viewModels[screen]?.onViewTeardown?()
+                    viewModels[screen]?.onViewTeardown = nil
                     window.close()
                     NotchSpaceManager.shared.notchSpace.windows.remove(window)
                     windows.removeValue(forKey: screen)

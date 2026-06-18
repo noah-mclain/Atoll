@@ -78,6 +78,7 @@ Atoll turns the MacBook notch into a focused command surface for media, system i
 - Hover near the notch to expand; click to enter controls.
 - Use tabs for Media, Stats, Timers, Clipboard, and more.
 - Adjust layout, appearance, and shortcuts from Settings.
+- Add files to Shelf from Terminal: `open -a Atoll /path/to/file`.
 
 ## Settings
 - Choose appearance, animation style, and per‑feature toggles.
@@ -112,7 +113,14 @@ Atoll builds upon the work of several open-source projects and draws inspiration
 
 - [**SkyLightWindow**](https://github.com/Lakr233/SkyLightWindow) - window rendering for Lock Screen Widgets
 
+- [**rtaudio**](https://github.com/ZephyrCodesStuff/rtaudio) - Live music visualizer using C++ was adapted from this project
+
+- [**SwiftTerm**](https://github.com/migueldeicaza/SwiftTerm) - Terminal tab implementation in the standard mode was adapted from this project
+
+- [**DynamicNotch**](https://github.com/jackson-storm/DynamicNotch) - thanks DynamicNotch for letting us use their battery huds
+
 - Wick - Thanks Nate for allowing us to replicate the iOS like Timer design for the Lock Screen Widget
+
 ## Contributors
 
 <a href="https://github.com/Ebullioscopic/Atoll/graphs/contributors">

@@ -261,7 +261,16 @@ struct StandaloneCalendarView: View {
     @Default(.hideCompletedReminders) private var hideCompletedReminders
 
     private let calendar = Calendar.current
-    private let weekdaySymbols = Calendar.current.shortWeekdaySymbols
+
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        guard !symbols.isEmpty else { return symbols }
+
+        let firstWeekdayIndex = max(0, min(symbols.count - 1, calendar.firstWeekday - 1))
+        var ordered = Array(symbols[firstWeekdayIndex...])
+        ordered.append(contentsOf: symbols[..<firstWeekdayIndex])
+        return ordered
+    }
 
     private var monthTitle: String {
         displayedMonth.formatted(.dateTime.month(.wide))
@@ -397,7 +406,7 @@ struct StandaloneCalendarView: View {
                 ScrollViewReader { proxy in
                     VStack(spacing: 6) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 14), spacing: 6), count: 7), spacing: 6) {
-                            ForEach(weekdaySymbols, id: \.self) { symbol in
+                            ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
                                 Text(symbol.prefix(1))
                                     .font(.caption2)
                                     .fontWeight(.semibold)
@@ -1001,6 +1010,16 @@ enum ConferenceProvider: CaseIterable {
         }
     }
     
+    var nativeURLScheme: String? {
+        switch self {
+        case .zoom: return "zoommtg"
+        case .teams: return "msteams"
+        case .facetime: return "facetime"
+        case .discord: return "discord"
+        default: return nil
+        }
+    }
+
     static func detect(from url: URL) -> ConferenceProvider {
         let host = url.host?.lowercased() ?? ""
         return allCases.first { provider in
@@ -1026,7 +1045,17 @@ struct ConferenceJoinButton: View {
     }
     
     var body: some View {
-        Button(action: { openURL(url) }) {
+        Button(action: {
+            if let scheme = provider.nativeURLScheme,
+               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                components.scheme = scheme
+                if let nativeURL = components.url {
+                    openURL(nativeURL)
+                    return
+                }
+            }
+            openURL(url)
+        }) {
             HStack(spacing: 4) {
                 Image(systemName: "video.fill")
                     .font(.system(size: 9))

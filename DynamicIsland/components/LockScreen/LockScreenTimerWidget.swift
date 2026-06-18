@@ -45,10 +45,6 @@ struct LockScreenTimerWidget: View {
         }
     }
 
-    private func displayFont(size: CGFloat) -> Font {
-        .custom("SF Pro Display", size: size)
-    }
-
     private var hasHoursComponent: Bool {
         abs(timerManager.remainingTime) >= 3600
     }
@@ -57,25 +53,15 @@ struct LockScreenTimerWidget: View {
         abs(timerManager.remainingTime) >= 36_000 // 10 hours or more
     }
 
-    private var titleFrameWidth: CGFloat {
-        if hasDoubleDigitHours { return 78 }
-        if hasHoursComponent { return 90 }
-        return 130
-    }
-
     private var countdownFrameWidth: CGFloat {
-        if hasDoubleDigitHours { return 248 }
-        if hasHoursComponent { return 235 }
-        return 205
+        if hasDoubleDigitHours { return 200 }
+        if hasHoursComponent { return 185 }
+        return 160
     }
 
     private var countdownFont: Font {
-        let baseSize: CGFloat = hasDoubleDigitHours ? 52 : 56
-        return displayFont(size: baseSize)
-    }
-
-    private var timerLabel: String {
-        timerManager.timerName.isEmpty ? "Timer" : timerManager.timerName
+        let baseSize: CGFloat = hasDoubleDigitHours ? 42 : 46
+        return .system(size: baseSize, weight: .bold, design: .rounded)
     }
 
     private var countdownText: String {
@@ -191,17 +177,18 @@ struct LockScreenTimerWidget: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 0) {
                 controlButtons
+                    .padding(.trailing, 12)
 
-                titleSection
-                    .frame(maxWidth: .infinity)
+                Spacer()
 
                 countdownSection
+                    .padding(.leading, 12)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 18)
+        .padding(.vertical, 12)
         .frame(width: widgetSize.width, height: widgetSize.height)
         .background(widgetBackground)
         .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
@@ -257,22 +244,6 @@ struct LockScreenTimerWidget: View {
         .frame(width: countdownFrameWidth, alignment: .center)
         .padding(.trailing, 2)
         .layoutPriority(2)
-    }
-
-    private var titleSection: some View {
-        VStack(alignment: .center, spacing: 0) {
-            MarqueeText(
-                .constant(timerLabel),
-                font: displayFont(size: 18),
-                nsFont: .title3,
-                textColor: accentColor,
-                minDuration: 0.16,
-                frameWidth: titleFrameWidth
-            )
-            .frame(maxWidth: titleFrameWidth)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .layoutPriority(0)
     }
 
     private var accentRibbon: some View {

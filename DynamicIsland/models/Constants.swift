@@ -128,13 +128,11 @@ enum AnimationLoopMode: String, Codable, CaseIterable {
 enum AnimationSource: Codable, Hashable, Equatable {
     case lottieFile(URL)        // Local file (in app support or bundle)
     case lottieURL(URL)         // Remote URL
-    case builtInFace            // Original MinimalFaceFeatures
     
     var displayType: String {
         switch self {
         case .lottieFile: return "Local"
         case .lottieURL: return "Remote"
-        case .builtInFace: return "Built-in"
         }
     }
 }
@@ -145,12 +143,14 @@ enum ExtensionPermissionScope: String, CaseIterable, Codable, Defaults.Serializa
     case liveActivities
     case lockScreenWidgets
     case notchExperiences
+    case fileSharing
 
     var displayName: String {
         switch self {
         case .liveActivities: return "Live Activities"
         case .lockScreenWidgets: return "Lock Screen Widgets"
         case .notchExperiences: return "Notch Experiences"
+        case .fileSharing: return "File Sharing"
         }
     }
 }
@@ -256,6 +256,54 @@ enum CalendarSelectionState: Codable, Defaults.Serializable {
     case selected(Set<String>)
 }
 
+enum FantasticalViewStyle: String, CaseIterable, Codable, Defaults.Serializable {
+    case mini = "mini"
+    case calendar = "calendar"
+    
+    var displayName: String {
+        switch self {
+        case .mini: return "Mini View"
+        case .calendar: return "Full Calendar"
+        }
+    }
+}
+
+enum ThirdPartyCalendarApp: String, CaseIterable, Codable, Defaults.Serializable, Identifiable {
+    case fantastical = "fantastical"
+    case notionCalendar = "notionCalendar"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .fantastical: return "Fantastical"
+        case .notionCalendar: return "Notion Calendar"
+        }
+    }
+    
+    /// Bundle identifiers to try when looking up the app icon (first match wins).
+    var bundleIdentifiers: [String] {
+        switch self {
+        case .fantastical: return ["com.flexibits.fantastical2.mac", "com.flexibits.fantastical"]
+        case .notionCalendar: return ["com.cron.electron"]
+        }
+    }
+    
+    var fallbackIconName: String {
+        switch self {
+        case .fantastical: return "calendar.badge.clock"
+        case .notionCalendar: return "calendar.badge.plus"
+        }
+    }
+    
+    var fallbackIconColor: Color {
+        switch self {
+        case .fantastical: return .red
+        case .notionCalendar: return .blue
+        }
+    }
+}
+
 enum ClipboardDisplayMode: String, CaseIterable, Codable, Defaults.Serializable {
     case popover = "popover"     // Traditional popover attached to button
     case panel = "panel"         // Floating panel near notch
@@ -316,6 +364,30 @@ enum ColorPickerDisplayMode: String, CaseIterable, Codable, Defaults.Serializabl
     }
 }
 
+enum ThirdPartyDDCProvider: String, CaseIterable, Codable, Defaults.Serializable, Identifiable {
+    case betterDisplay
+    case lunar
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .betterDisplay:
+            return "BetterDisplay"
+        case .lunar:
+            return "Lunar"
+        }
+    }
+    
+    /// Bundle identifiers to try when looking up the app icon.
+    var bundleIdentifiers: [String] {
+        switch self {
+        case .betterDisplay: return ["pro.betterdisplay.BetterDisplay"]
+        case .lunar: return ["fyi.lunar.Lunar"]
+        }
+    }
+}
+
 enum HideNotchOption: String, Defaults.Serializable {
     case always
     case nowPlayingOnly
@@ -333,6 +405,7 @@ enum MediaControllerType: String, CaseIterable, Identifiable, Defaults.Serializa
     case appleMusic = "Apple Music"
     case spotify = "Spotify"
     case youtubeMusic = "Youtube Music"
+    case amazonMusic = "Amazon Music"
     
     var id: String { self.rawValue }
     
@@ -342,6 +415,7 @@ enum MediaControllerType: String, CaseIterable, Identifiable, Defaults.Serializa
         case .appleMusic: return String(localized: "Apple Music")
         case .spotify: return String(localized: "Spotify")
         case .youtubeMusic: return String(localized: "Youtube Music")
+        case .amazonMusic: return String(localized: "Amazon Music")
         }
     }
 }
@@ -357,6 +431,26 @@ enum SneakPeekStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
         switch self {
         case .standard: return String(localized: "Default")
         case .inline: return String(localized: "Inline")
+        }
+    }
+}
+
+enum LogLevel: Int, CaseIterable, Identifiable, Defaults.Serializable {
+    case none = 0
+    case error = 1
+    case warning = 2
+    case info = 3
+    case debug = 4
+    
+    var id: Int { self.rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .none: return "No Logging"
+        case .error: return "Error"
+        case .warning: return "Warning"
+        case .info: return "Info"
+        case .debug: return "Debug"
         }
     }
 }
@@ -397,6 +491,22 @@ enum ProgressBarStyle: String, CaseIterable, Identifiable, Defaults.Serializable
     case segmented = "Segmented"
     
     var id: String { self.rawValue }
+}
+
+enum BatteryNotificationStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case standard
+    case compact
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard:
+            return String(localized: "Standard")
+        case .compact:
+            return String(localized: "Compact")
+        }
+    }
 }
 
 enum MusicAuxiliaryControl: String, CaseIterable, Identifiable, Defaults.Serializable {
@@ -539,6 +649,7 @@ enum AIModelProvider: String, CaseIterable, Identifiable, Defaults.Serializable 
     case openai = "OpenAI GPT"
     case claude = "Claude"
     case local = "Local Model"
+    case groq = "Groq"
     
     var id: String { self.rawValue }
     
@@ -552,6 +663,7 @@ enum AIModelProvider: String, CaseIterable, Identifiable, Defaults.Serializable 
         case .openai: return "OpenAI's GPT models with advanced reasoning"
         case .claude: return "Anthropic's Claude with strong analytical skills"
         case .local: return "Local AI model (Ollama or similar)"
+        case .groq: return "Groq's fast inference for OpenAI-compatible models"
         }
     }
     
@@ -592,6 +704,13 @@ enum AIModelProvider: String, CaseIterable, Identifiable, Defaults.Serializable 
                 AIModel(id: "llama3.2", name: "Llama 3.2", supportsThinking: false),
                 AIModel(id: "qwen2.5", name: "Qwen 2.5", supportsThinking: false)
             ]
+        case .groq:
+            return [
+                AIModel(id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B Versatile", supportsThinking: false),
+                AIModel(id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant", supportsThinking: false),
+                AIModel(id: "qwen-qwq-32b", name: "Qwen QWQ 32B", supportsThinking: false),
+                AIModel(id: "mixtral-8x7b-32768", name: "Mixtral 8x7B", supportsThinking: false)
+            ]
         }
     }
 }
@@ -611,23 +730,37 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
     var title: String
     var content: String
     var creationDate: Date
+    var modificationDate: Date
     var colorIndex: Int // 0: Yellow, 1: Blue, 2: Red, 3: Green
     var isPinned: Bool = false
     var imageFileName: String? = nil // Store filename instead of raw data
+    var appleNotesId: String? = nil
     
     // Internal property for migration
     private enum CodingKeys: String, CodingKey {
-        case id, title, content, creationDate, colorIndex, isPinned, imageFileName, imageData
+        case id, title, content, creationDate, modificationDate, colorIndex, isPinned, imageFileName, imageData, appleNotesId
     }
     
-    init(id: UUID = UUID(), title: String, content: String, creationDate: Date, colorIndex: Int, isPinned: Bool = false, imageFileName: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        content: String,
+        creationDate: Date,
+        modificationDate: Date? = nil,
+        colorIndex: Int,
+        isPinned: Bool = false,
+        imageFileName: String? = nil,
+        appleNotesId: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.content = content
         self.creationDate = creationDate
+        self.modificationDate = modificationDate ?? creationDate
         self.colorIndex = colorIndex
         self.isPinned = isPinned
         self.imageFileName = imageFileName
+        self.appleNotesId = appleNotesId
     }
     
     init(from decoder: Decoder) throws {
@@ -636,8 +769,10 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
         title = try container.decode(String.self, forKey: .title)
         content = try container.decode(String.self, forKey: .content)
         creationDate = try container.decode(Date.self, forKey: .creationDate)
+        modificationDate = try container.decodeIfPresent(Date.self, forKey: .modificationDate) ?? creationDate
         colorIndex = try container.decode(Int.self, forKey: .colorIndex)
         isPinned = try container.decode(Bool.self, forKey: .isPinned)
+        appleNotesId = try container.decodeIfPresent(String.self, forKey: .appleNotesId)
         
         // Migration logic: if imageData exists but imageFileName doesn't, save it to disk
         if let data = try container.decodeIfPresent(Data.self, forKey: .imageData) {
@@ -656,9 +791,11 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
         try container.encode(title, forKey: .title)
         try container.encode(content, forKey: .content)
         try container.encode(creationDate, forKey: .creationDate)
+        try container.encode(modificationDate, forKey: .modificationDate)
         try container.encode(colorIndex, forKey: .colorIndex)
         try container.encode(isPinned, forKey: .isPinned)
         try container.encode(imageFileName, forKey: .imageFileName)
+        try container.encodeIfPresent(appleNotesId, forKey: .appleNotesId)
     }
     
     static let colors: [Color] = [.yellow, .blue, .red, .green, .purple, .orange]
@@ -688,10 +825,11 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
 
 extension Defaults.Keys {
         // MARK: General
+    static let logLevel = Key<LogLevel>("logLevel", default: .none)
     static let menubarIcon = Key<Bool>("menubarIcon", default: true)
     static let showOnAllDisplays = Key<Bool>("showOnAllDisplays", default: false)
     static let automaticallySwitchDisplay = Key<Bool>("automaticallySwitchDisplay", default: true)
-    static let releaseName = Key<String>("releaseName", default: "Seychelles")
+    static let releaseName = Key<String>("releaseName", default: "Fiji")
     static let hideDynamicIslandFromScreenCapture = Key<Bool>("hideDynamicIslandFromScreenCapture", default: false)
     
         // MARK: Behavior
@@ -722,6 +860,7 @@ extension Defaults.Keys {
         //static let alwaysShowTabs = Key<Bool>("alwaysShowTabs", default: true)
     static let showMirror = Key<Bool>("showMirror", default: false)
     static let mirrorShape = Key<MirrorShapeEnum>("mirrorShape", default: MirrorShapeEnum.rectangle)
+    static let selectedCameraID = Key<String>("selectedCameraID", default: "")
     static let settingsIconInNotch = Key<Bool>("settingsIconInNotch", default: true)
     static let lightingEffect = Key<Bool>("lightingEffect", default: true)
     static let accentColor = Key<Color>("accentColor", default: Color.blue)
@@ -758,11 +897,12 @@ extension Defaults.Keys {
     
         // MARK: Media playback
     static let coloredSpectrogram = Key<Bool>("coloredSpectrogram", default: true)
+    static let enableRealTimeWaveform = Key<Bool>("enableRealTimeWaveform", default: false)
     static let enableSneakPeek = Key<Bool>("enableSneakPeek", default: false)
     static let sneakPeekStyles = Key<SneakPeekStyle>("sneakPeekStyles", default: .standard)
     static let showSneakPeekOnTrackChange = Key<Bool>("showSneakPeekOnTrackChange", default: true)
     static let enableFullscreenMediaDetection = Key<Bool>("enableFullscreenMediaDetection", default: true)
-    static let enableParallaxEffect = Key<Bool>("enableParallaxEffect", default: true)
+    static let parallaxEffectIntensity = Key<Double>("parallaxEffectIntensity", default: 6.0)
     static let waitInterval = Key<Double>("waitInterval", default: 3)
     static let showShuffleAndRepeat = Key<Bool>("showShuffleAndRepeat", default: true)
     static let showMediaOutputControl = Key<Bool>("showMediaOutputControl", default: true)
@@ -774,6 +914,7 @@ extension Defaults.Keys {
     static let musicSkipBehavior = Key<MusicSkipBehavior>("musicSkipBehavior", default: .track)
     static let musicControlWindowEnabled = Key<Bool>("musicControlWindowEnabled", default: false)
     static let showStandardMediaControls = Key<Bool>("showStandardMediaControls", default: true)
+    static let autoHideInactiveNotchMediaPlayer = Key<Bool>("autoHideInactiveNotchMediaPlayer", default: true)
     static let cachedMusicLiveActivityPreference = Key<Bool?>("cachedMusicLiveActivityPreference", default: nil)
     static let cachedLockScreenMediaWidgetPreference = Key<Bool?>("cachedLockScreenMediaWidgetPreference", default: nil)
     static let cachedMusicControlWindowPreference = Key<Bool?>("cachedMusicControlWindowPreference", default: nil)
@@ -818,7 +959,16 @@ extension Defaults.Keys {
     )
     static let lockScreenShowAppIcon = Key<Bool>("lockScreenShowAppIcon", default: false)
     static let lockScreenPanelShowsBorder = Key<Bool>("lockScreenPanelShowsBorder", default: false)
+    static let lockScreenMusicUsesEnhancedLiquidBorder = Key<Bool>(
+        "lockScreenMusicUsesEnhancedLiquidBorder",
+        default: true
+    )
     static let lockScreenPanelUsesBlur = Key<Bool>("lockScreenPanelUsesBlur", default: true)
+    static let lockScreenMusicMergedAirPlayOutput = Key<Bool>("lockScreenMusicMergedAirPlayOutput", default: true)
+    static let lockScreenMusicFullscreenArtworkEnabled = Key<Bool>("lockScreenMusicFullscreenArtworkEnabled", default: true)
+    static let lockScreenKeepAlbumArtVisibleDuringFullscreenArtwork = Key<Bool>("lockScreenKeepAlbumArtVisibleDuringFullscreenArtwork", default: false)
+    static let lockScreenMusicFullscreenVideoArtwork = Key<Bool>("lockScreenMusicFullscreenVideoArtwork", default: true)
+    static let lockScreenUseArtworkLayoutOverFullscreenCanvas = Key<Bool>("lockScreenShowCenteredAlbumArtOverFullscreenCanvas", default: true)
     static let lockScreenTimerWidgetUsesBlur = Key<Bool>("lockScreenTimerWidgetUsesBlur", default: false)
     static let lockScreenReminderChipStyle = Key<LockScreenReminderChipStyle>("lockScreenReminderChipStyle", default: .eventColor)
     static let lockScreenReminderWidgetHorizontalAlignment = Key<String>("lockScreenReminderWidgetHorizontalAlignment", default: "center")
@@ -835,13 +985,29 @@ extension Defaults.Keys {
     static let lockScreenShowCalendarStartTimeAfterBegins = Key<Bool>("lockScreenShowCalendarStartTimeAfterBegins", default: true)
     static let lockScreenWeatherWidgetRowOrder = Key<String>("lockScreenWeatherWidgetRowOrder", default: "weather_calendar_focus")
     
+    // MARK: Third-party Calendar Integration
+    static let enableThirdPartyCalendarApp = Key<Bool>("enableThirdPartyCalendarApp", default: false)
+    static let selectedCalendarApp = Key<ThirdPartyCalendarApp>("selectedCalendarApp", default: .fantastical)
+    static let fantasticalDefaultView = Key<FantasticalViewStyle>("fantasticalDefaultView", default: .mini)
+    
         // MARK: Battery
     static let showPowerStatusNotifications = Key<Bool>("showPowerStatusNotifications", default: true)
     static let showBatteryIndicator = Key<Bool>("showBatteryIndicator", default: BatteryActivityManager.shared.hasBattery())
     static let showBatteryPercentage = Key<Bool>("showBatteryPercentage", default: true)
+    static let showBatteryPercentInside = Key<Bool>("showBatteryPercentInside", default: true)
     static let showPowerStatusIcons = Key<Bool>("showPowerStatusIcons", default: true)
     static let playLowBatteryAlertSound = Key<Bool>("playLowBatteryAlertSound", default: true)
-    
+    static let showChargingBatteryHUD = Key<Bool>("showChargingBatteryHUD", default: true)
+    static let showLowBatteryHUD = Key<Bool>("showLowBatteryHUD", default: true)
+    static let showFullBatteryHUD = Key<Bool>("showFullBatteryHUD", default: true)
+    static let chargingBatteryHUDDuration = Key<Int>("chargingBatteryHUDDuration", default: 3)
+    static let lowBatteryHUDDuration = Key<Int>("lowBatteryHUDDuration", default: 3)
+    static let fullBatteryHUDDuration = Key<Int>("fullBatteryHUDDuration", default: 3)
+    static let lowBatteryHUDThreshold = Key<Int>("lowBatteryHUDThreshold", default: 20)
+    static let fullBatteryHUDThreshold = Key<Int>("fullBatteryHUDThreshold", default: 100)
+    static let lowBatteryHUDStyle = Key<BatteryNotificationStyle>("lowBatteryHUDStyle", default: .standard)
+    static let fullBatteryHUDStyle = Key<BatteryNotificationStyle>("fullBatteryHUDStyle", default: .standard)
+
     static let lockScreenBatteryShowsBatteryGauge = Key<Bool>(
         "lockScreenWeatherShowsBatteryGauge",
         default: BatteryActivityManager.shared.hasBattery()
@@ -870,6 +1036,9 @@ extension Defaults.Keys {
     static let dynamicShelf = Key<Bool>("dynamicShelf", default: true)
     static let openShelfByDefault = Key<Bool>("openShelfByDefault", default: true)
         static let quickShareProvider = Key<String>("quickShareProvider", default: "AirDrop")
+        static let localSendSelectedDeviceID = Key<String>("localSendSelectedDeviceID", default: "")
+        static let localSendDevicePickerGlassMode = Key<LockScreenGlassCustomizationMode>("localSendDevicePickerGlassMode", default: .standard)
+        static let localSendDevicePickerLiquidGlassVariant = Key<LiquidGlassVariant>("localSendDevicePickerLiquidGlassVariant", default: .v11)
         static let copyOnDrag = Key<Bool>("copyOnDrag", default: false)
         static let autoRemoveShelfItems = Key<Bool>("autoRemoveShelfItems", default: false)
         static let expandedDragDetection = Key<Bool>("expandedDragDetection", default: true)
@@ -889,6 +1058,10 @@ extension Defaults.Keys {
     
     // MARK: Media Controller
     static let mediaController = Key<MediaControllerType>("mediaController", default: defaultMediaController)
+    static let spotifySPDCCookie = Key<String>("spotifySPDCCookie", default: "")
+    static let spotifyAuthAccessToken = Key<String>("spotifyAuthAccessToken", default: "")
+    static let spotifyAuthAccessTokenExpiration = Key<Double>("spotifyAuthAccessTokenExpiration", default: 0)
+    static let spotifyAuthLastValidatedAt = Key<Double>("spotifyAuthLastValidatedAt", default: 0)
     
     // MARK: Bluetooth Audio Devices
     static let showBluetoothDeviceConnections = Key<Bool>("showBluetoothDeviceConnections", default: true)
@@ -915,6 +1088,7 @@ extension Defaults.Keys {
     // MARK: Terminal Feature
     static let enableTerminalFeature = Key<Bool>("enableTerminalFeature", default: false)
     static let terminalShellPath = Key<String>("terminalShellPath", default: "/bin/zsh")
+    static let terminalFontFamily = Key<String>("terminalFontFamily", default: "")
     static let terminalFontSize = Key<Double>("terminalFontSize", default: 12.0)
     static let terminalOpacity = Key<Double>("terminalOpacity", default: 1.0)
     static let terminalMaxHeightFraction = Key<Double>("terminalMaxHeightFraction", default: 0.4)
@@ -940,6 +1114,8 @@ extension Defaults.Keys {
     static let timerShowsProgress = Key<Bool>("timerShowsProgress", default: true)
     static let timerProgressStyle = Key<TimerProgressStyle>("timerProgressStyle", default: .bar)
     static let mirrorSystemTimer = Key<Bool>("mirrorSystemTimer", default: true)
+    static let timerInputStyle = Key<TimerInputStyle>("timerInputStyle", default: .manual)
+    
     
     // MARK: Reminder Live Activity
     static let enableReminderLiveActivity = Key<Bool>("enableReminderLiveActivity", default: true)
@@ -967,6 +1143,7 @@ extension Defaults.Keys {
     static let geminiApiKey = Key<String>("geminiApiKey", default: "")
     static let openaiApiKey = Key<String>("openaiApiKey", default: "")
     static let claudeApiKey = Key<String>("claudeApiKey", default: "")
+    static let groqApiKey = Key<String>("groqApiKey", default: "")
     static let selectedAIProvider = Key<AIModelProvider>("selectedAIProvider", default: .gemini)
     static let selectedAIModel = Key<AIModel?>("selectedAIModel", default: nil)
     static let enableThinkingMode = Key<Bool>("enableThinkingMode", default: false)
@@ -986,6 +1163,7 @@ extension Defaults.Keys {
     static let extensionLiveActivityCapacity = Key<Int>("extensionLiveActivityCapacity", default: 4)
     static let extensionLockScreenWidgetCapacity = Key<Int>("extensionLockScreenWidgetCapacity", default: 4)
     static let extensionNotchExperienceCapacity = Key<Int>("extensionNotchExperienceCapacity", default: 2)
+    static let enableExtensionFileSharing = Key<Bool>("enableExtensionFileSharing", default: true)
     
     // MARK: Keyboard Shortcuts
     static let enableShortcuts = Key<Bool>("enableShortcuts", default: true)
@@ -997,6 +1175,12 @@ extension Defaults.Keys {
     static let enableKeyboardBacklightHUD = Key<Bool>("enableKeyboardBacklightHUD", default: true)
     static let systemHUDSensitivity = Key<Int>("systemHUDSensitivity", default: 5)
     static let playVolumeChangeFeedback = Key<Bool>("playVolumeChangeFeedback", default: false)
+
+    // Step sizes for hardware media keys (percent of full range, 1-25)
+    static let volumeStepPercent = Key<Int>("volumeStepPercent", default: 6)
+    static let volumeFineStepPercent = Key<Int>("volumeFineStepPercent", default: 2)
+    static let brightnessStepPercent = Key<Int>("brightnessStepPercent", default: 6)
+    static let brightnessFineStepPercent = Key<Int>("brightnessFineStepPercent", default: 2)
     
     // MARK: Custom OSD Window Feature
     static let enableCustomOSD = Key<Bool>("enableCustomOSD", default: false)
@@ -1027,8 +1211,15 @@ extension Defaults.Keys {
     static let circularHUDStrokeWidth = Key<CGFloat>("circularHUDStrokeWidth", default: 4)
     static let circularHUDUseAccentColor = Key<Bool>("circularHUDUseAccentColor", default: true)
 
-    // MARK: BetterDisplay Integration
+    // MARK: Third-Party DDC Integration
+    static let enableThirdPartyDDCIntegration = Key<Bool>("enableThirdPartyDDCIntegration", default: false)
+    static let thirdPartyDDCProvider = Key<ThirdPartyDDCProvider>("thirdPartyDDCProvider", default: .betterDisplay)
+    static let enableExternalVolumeControlListener = Key<Bool>("enableExternalVolumeControlListener", default: false)
+    static let didMigrateThirdPartyDDCIntegration = Key<Bool>("didMigrateThirdPartyDDCIntegration", default: false)
+
+    // Legacy keys retained for migration/backward compatibility
     static let enableBetterDisplayIntegration = Key<Bool>("enableBetterDisplayIntegration", default: false)
+    static let enableLunarIntegration = Key<Bool>("enableLunarIntegration", default: false)
     
     static let hasSeenOSDAlphaWarning = Key<Bool>("hasSeenOSDAlphaWarning", default: false)
     static let enableOSDVolume = Key<Bool>("enableOSDVolume", default: true)
@@ -1081,6 +1272,7 @@ extension Defaults.Keys {
     
     // MARK: Lyrics Feature
     static let enableLyrics = Key<Bool>("enableLyrics", default: false)
+    static let showLiveCanvasInDynamicIsland = Key<Bool>("showLiveCanvasInDynamicIsland", default: false)
     
     // MARK: Notes Feature
     static let enableNotes = Key<Bool>("enableNotes", default: false)
@@ -1090,6 +1282,8 @@ extension Defaults.Keys {
     static let enableCreateFromClipboard = Key<Bool>("enableCreateFromClipboard", default: true)
     static let enableNoteCharCount = Key<Bool>("enableNoteCharCount", default: true)
     static let savedNotes = Key<[NoteItem]>("savedNotes", default: [])
+    static let enableAppleNotesSync = Key<Bool>("enableAppleNotesSync", default: false)
+    static let appleNotesLastSyncDate = Key<Date?>("appleNotesLastSyncDate", default: nil)
     
     // Helper to determine the default media controller based on macOS version
     static var defaultMediaController: MediaControllerType {
@@ -1152,6 +1346,29 @@ extension Defaults.Keys {
         Defaults[.didMigrateMusicControlSlots] = true
     }
 
+    static func migrateThirdPartyDDCIntegration() {
+        if Defaults[.didMigrateThirdPartyDDCIntegration] == false {
+            let legacyBetterDisplayEnabled = Defaults[.enableBetterDisplayIntegration]
+            let legacyLunarEnabled = Defaults[.enableLunarIntegration]
+
+            if legacyBetterDisplayEnabled || legacyLunarEnabled {
+                Defaults[.enableThirdPartyDDCIntegration] = true
+                Defaults[.thirdPartyDDCProvider] = (legacyLunarEnabled && !legacyBetterDisplayEnabled) ? .lunar : .betterDisplay
+            }
+
+            Defaults[.didMigrateThirdPartyDDCIntegration] = true
+        }
+
+        syncLegacyThirdPartyDDCKeys()
+    }
+
+    static func syncLegacyThirdPartyDDCKeys() {
+        let isIntegrationEnabled = Defaults[.enableThirdPartyDDCIntegration]
+        let selectedProvider = Defaults[.thirdPartyDDCProvider]
+        Defaults[.enableBetterDisplayIntegration] = isIntegrationEnabled && selectedProvider == .betterDisplay
+        Defaults[.enableLunarIntegration] = isIntegrationEnabled && selectedProvider == .lunar
+    }
+
     private static func normalizeMusicAuxControls() {
         guard Defaults[.musicAuxLeftControl] == Defaults[.musicAuxRightControl] else { return }
 
@@ -1159,4 +1376,5 @@ extension Defaults.Keys {
         let fallback = MusicAuxiliaryControl.alternative(excluding: current)
         Defaults[.musicAuxRightControl] = fallback
     }
+    static let showSongMetadataInClosedNotch = Key<Bool>("showSongMetadataInClosedNotch", default: false)
 }

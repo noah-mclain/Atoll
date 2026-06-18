@@ -26,6 +26,8 @@ import AVFoundation
 enum LockScreenAnimationTimings {
     static let lockExpand: TimeInterval = 0.45
     static let unlockCollapse: TimeInterval = 0.82
+    static let postUnlockMusicHUDPause: TimeInterval = 1.0
+    static let postUnlockMusicHUDReveal: TimeInterval = 0.34
 }
 
 @MainActor
@@ -39,11 +41,14 @@ class LockScreenManager: ObservableObject {
     // MARK: - Published Properties
     @Published var isLocked: Bool = false
     @Published var isLockIdle: Bool = true
+    @Published var shouldDelayPostUnlockMusicHUD: Bool = false
     @Published var lastUpdated: Date = .distantPast
     
     // MARK: - Private Properties
     private var debounceIdleTask: Task<Void, Never>?
     private var collapseTask: Task<Void, Never>?
+    private var postUnlockMusicHUDTask: Task<Void, Never>?
+    private var lockStatePollTask: Task<Void, Never>?
     
     // MARK: - Helpers
     
@@ -61,8 +66,11 @@ class LockScreenManager: ObservableObject {
     
     deinit {
         DistributedNotificationCenter.default().removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         debounceIdleTask?.cancel()
         collapseTask?.cancel()
+        postUnlockMusicHUDTask?.cancel()
+        lockStatePollTask?.cancel()
     }
     
     // MARK: - Setup
@@ -75,7 +83,7 @@ class LockScreenManager: ObservableObject {
             name: .init("com.apple.screenIsLocked"),
             object: nil
         )
-        
+
         // Observe screen unlocked event
         DistributedNotificationCenter.default().addObserver(
             self,
@@ -83,7 +91,18 @@ class LockScreenManager: ObservableObject {
             name: .init("com.apple.screenIsUnlocked"),
             object: nil
         )
-        
+
+        // Fallback: macOS sometimes delays `com.apple.screenIsUnlocked`, leaving
+        // lock-screen widgets visible after the user-perceived unlock.
+        // The workspace session-active notification typically fires earlier; the
+        // guard at the top of `screenUnlocked` makes the call idempotent.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(screenUnlocked),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil
+        )
+
         print("LockScreenManager: ✅ Observers registered for lock/unlock events")
     }
     
@@ -102,6 +121,8 @@ class LockScreenManager: ObservableObject {
         // Update state SYNCHRONOUSLY without Task/await to avoid any delay
         lastUpdated = Date()
         updateIdleState(locked: true)
+        postUnlockMusicHUDTask?.cancel()
+        shouldDelayPostUnlockMusicHUD = false
         
         // Set locked state immediately without animation wrapper
         isLocked = true
@@ -134,9 +155,11 @@ class LockScreenManager: ObservableObject {
             print("[\(timestamp())] LockScreenManager: ⏭️ Lock icon disabled in settings")
         }
         
+        startLockStatePolling()
+
         print("[\(timestamp())] LockScreenManager: ✅ Lock screen activated")
     }
-    
+
     @objc private func screenUnlocked() {
         guard isLocked else {
             print("[\(timestamp())] LockScreenManager: 🔁 Unlock event ignored (already unlocked)")
@@ -149,10 +172,39 @@ class LockScreenManager: ObservableObject {
         lastUpdated = Date()
         updateIdleState(locked: false)
         isLocked = false
+        stopLockStatePolling()
+        postUnlockMusicHUDTask?.cancel()
+        shouldDelayPostUnlockMusicHUD = Defaults[.enableLockScreenLiveActivity]
+
+        if shouldDelayPostUnlockMusicHUD {
+            postUnlockMusicHUDTask = Task { [weak self] in
+                try? await Task.sleep(
+                    for: .seconds(
+                        LockScreenAnimationTimings.unlockCollapse
+                            + LockScreenAnimationTimings.postUnlockMusicHUDPause
+                    )
+                )
+                guard let self = self, !Task.isCancelled else { return }
+                await MainActor.run {
+                    if !self.isLocked {
+                        withAnimation(
+                            .spring(
+                                response: LockScreenAnimationTimings.postUnlockMusicHUDReveal,
+                                dampingFraction: 0.88,
+                                blendDuration: 0.08
+                            )
+                        ) {
+                            self.shouldDelayPostUnlockMusicHUD = false
+                        }
+                    }
+                }
+            }
+        }
         
         // Hide panel window immediately and synchronously
         print("[\(timestamp())] LockScreenManager: 🚪 Hiding panel window")
         LockScreenPanelManager.shared.hidePanel()
+        FullScreenArtworkWindowManager.shared.hide()
         LockScreenLiveActivityWindowManager.shared.showUnlockAndScheduleHide()
         LockScreenWeatherManager.shared.hideWeatherWidget()
         LockScreenTimerWidgetManager.shared.handleLockStateChange(isLocked: false)
@@ -172,8 +224,46 @@ class LockScreenManager: ObservableObject {
         print("[\(self.timestamp())] LockScreenManager: ✅ Lock screen deactivated")
     }
     
+    // MARK: - Lock State Polling
+
+    // Defensive fallback against late/missed `com.apple.screenIsUnlocked` and
+    // `NSWorkspace.sessionDidBecomeActiveNotification` notifications, which
+    // macOS sometimes delivers well after the user-perceived unlock — leaving
+    // lock-screen widgets visible for an extra moment. While we believe we are
+    // locked, poll the canonical session-lock state and fire `screenUnlocked()`
+    // the moment the OS flips. The handler's duplicate-event guard makes this
+    // safe to call alongside any later-arriving notification.
+    private static func isSessionScreenLocked() -> Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else {
+            return false
+        }
+        return session["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
+    private func startLockStatePolling() {
+        lockStatePollTask?.cancel()
+        lockStatePollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    guard let self, self.isLocked else { return }
+                    if !Self.isSessionScreenLocked() {
+                        print("[\(self.timestamp())] LockScreenManager: 🔓 Polling detected unlock ahead of notification")
+                        self.screenUnlocked()
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopLockStatePolling() {
+        lockStatePollTask?.cancel()
+        lockStatePollTask = nil
+    }
+
     // MARK: - Idle State Management
-    
+
     /// Copy EXACT logic from ScreenRecordingManager
     private func updateIdleState(locked: Bool) {
         if locked {
@@ -182,8 +272,9 @@ class LockScreenManager: ObservableObject {
         } else {
             debounceIdleTask?.cancel()
             debounceIdleTask = Task { [weak self] in
-                let configuredInterval = max(Defaults[.waitInterval], 0)
-                let idleDelay = min(max(configuredInterval, 0.2), LockScreenAnimationTimings.unlockCollapse)
+                // Keep the lock live activity mounted until the collapse animation finishes,
+                // otherwise the content disappears before the island fully closes.
+                let idleDelay = LockScreenAnimationTimings.unlockCollapse
                 try? await Task.sleep(for: .seconds(idleDelay))
                 guard let self = self, !Task.isCancelled else { return }
                 await MainActor.run {

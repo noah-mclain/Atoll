@@ -128,6 +128,7 @@ final class ExtensionLiveActivityManager: ObservableObject {
         if previousCount != activeActivities.count {
             Logger.log("Dismissed extension live activity \(activityID) from \(bundleIdentifier)", category: .extensions)
             ExtensionXPCServiceHost.shared.notifyActivityDismiss(bundleIdentifier: bundleIdentifier, activityID: activityID)
+            ExtensionRPCServer.shared.notifyActivityDismiss(bundleIdentifier: bundleIdentifier, activityID: activityID)
             logDiagnostics("Removed live activity \(activityID) for \(bundleIdentifier); remaining: \(activeActivities.count)")
             broadcastSnapshot()
         }
@@ -140,7 +141,10 @@ final class ExtensionLiveActivityManager: ObservableObject {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
             activeActivities.removeAll { $0.bundleIdentifier == bundleIdentifier }
         }
-        ids.forEach { ExtensionXPCServiceHost.shared.notifyActivityDismiss(bundleIdentifier: bundleIdentifier, activityID: $0) }
+        ids.forEach {
+            ExtensionXPCServiceHost.shared.notifyActivityDismiss(bundleIdentifier: bundleIdentifier, activityID: $0)
+            ExtensionRPCServer.shared.notifyActivityDismiss(bundleIdentifier: bundleIdentifier, activityID: $0)
+        }
         if !ids.isEmpty {
             logDiagnostics("Removed all live activities for \(bundleIdentifier); ids: \(ids.joined(separator: ", "))")
             broadcastSnapshot()
