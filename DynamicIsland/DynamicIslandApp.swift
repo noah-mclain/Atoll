@@ -307,7 +307,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 viewModels[screen]?.onViewTeardown?()
                 viewModels[screen]?.onViewTeardown = nil
                 window.close()
-                NotchSpaceManager.shared.notchSpace.windows.remove(window)
             }
             windows.removeAll()
             viewModels.removeAll()
@@ -315,7 +314,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             vm.onViewTeardown?()
             vm.onViewTeardown = nil
             window.close()
-            NotchSpaceManager.shared.notchSpace.windows.remove(window)
             self.window = nil
         }
     }
@@ -326,16 +324,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Use the current required size instead of always using openNotchSize
         let baseSize = calculateRequiredNotchSize()
         let requiredSize = adjustedSizeForScreen(baseSize, screen: screen)
+        let roundedWidth = requiredSize.width.rounded()
+        let roundedHeight = requiredSize.height.rounded()
         
         let window = DynamicIslandWindow(
             contentRect: NSRect(
-                x: 0, y: 0, width: requiredSize.width, height: requiredSize.height),
-            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
+                x: 0, y: 0, width: roundedWidth, height: roundedHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
 
         window.animationBehavior = .none
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         
         window.contentView = FirstMouseHostingView(
             rootView: ContentView()
@@ -345,7 +346,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         
         window.orderFrontRegardless()
-        NotchSpaceManager.shared.notchSpace.windows.insert(window)
         //SkyLightOperator.shared.delegateWindow(window)
         return window
     }
@@ -359,14 +359,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Use the same centering logic as updateWindowSizeIfNeeded()
         let screenFrame = screen.frame
         let centerX = screenFrame.origin.x + (screenFrame.width / 2)
-        let newX = centerX - (window.frame.width / 2)
-        let newY = screenFrame.origin.y + screenFrame.height - window.frame.height
+        let newX = (centerX - (window.frame.width / 2)).rounded()
+        let newY = (screenFrame.origin.y + screenFrame.height - window.frame.height).rounded()
         
         window.setFrame(NSRect(
             x: newX,
             y: newY,
-            width: window.frame.width,
-            height: window.frame.height
+            width: window.frame.width.rounded(),
+            height: window.frame.height.rounded()
         ), display: false)
         
         if changeAlpha {
@@ -507,11 +507,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func resizeWindow(_ window: NSWindow, on screen: NSScreen, to size: CGSize, animated: Bool) {
         let screenFrame = screen.frame
         // Clamp width to screen width so the notch never extends beyond screen edges on scaled displays
-        let clampedWidth = min(size.width, screenFrame.width)
-        let clampedHeight = min(size.height, screenFrame.height)
+        let clampedWidth = min(size.width, screenFrame.width).rounded()
+        let clampedHeight = min(size.height, screenFrame.height).rounded()
         let centerX = screenFrame.midX
-        let newX = centerX - (clampedWidth / 2)
-        let newY = screenFrame.origin.y + screenFrame.height - clampedHeight
+        let newX = (centerX - (clampedWidth / 2)).rounded()
+        let newY = (screenFrame.origin.y + screenFrame.height - clampedHeight).rounded()
         let targetFrame = NSRect(x: newX, y: newY, width: clampedWidth, height: clampedHeight)
 
         window.setFrame(targetFrame, display: true)
@@ -1308,7 +1308,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     viewModels[screen]?.onViewTeardown?()
                     viewModels[screen]?.onViewTeardown = nil
                     window.close()
-                    NotchSpaceManager.shared.notchSpace.windows.remove(window)
                     windows.removeValue(forKey: screen)
                     viewModels.removeValue(forKey: screen)
                 }

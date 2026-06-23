@@ -83,7 +83,13 @@ class FullscreenMediaDetector: ObservableObject {
         let names = NSScreen.screens.map { $0.localizedName }
         var newStatus: [String: Bool] = [:]
         for name in names {
-            newStatus[name] = apps.contains { $0.screen.localizedName == name && $0.bundleIdentifier != "com.apple.finder" && ($0.bundleIdentifier == musicManager.bundleIdentifier || Defaults[.hideNotchOption] == .always) }
+            newStatus[name] = apps.contains { app in
+                app.screen.localizedName == name &&
+                app.bundleIdentifier != "com.apple.finder" &&
+                (app.bundleIdentifier == musicManager.bundleIdentifier || Defaults[.hideNotchOption] == .always) &&
+                abs(app.windowFrame.width - app.screen.frame.width) < 10 &&
+                abs(app.windowFrame.height - app.screen.frame.height) < 10
+            }
         }
 
         if newStatus != fullscreenStatus {
