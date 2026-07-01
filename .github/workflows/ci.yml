@@ -44,18 +44,23 @@ jobs:
           
           if [ -n "$CERTIFICATE_BASE64" ]; then
             CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+            KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
             echo -n "$CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
             
-            # Use the runner's default login keychain
-            KEYCHAIN_PATH=$HOME/Library/Keychains/login.keychain-db
-            
-            # Unlock the login keychain (GitHub Actions runners have an empty password by default)
+            # Create a temporary keychain with an empty password
+            security create-keychain -p "" $KEYCHAIN_PATH
+            security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
             security unlock-keychain -p "" $KEYCHAIN_PATH
             
-            # Import certificate into login keychain
+            # Set it as the default so Xcode's provisioning engine finds it
+            security default-keychain -s $KEYCHAIN_PATH
+            security list-keychains -d user -s $KEYCHAIN_PATH
+            
+            # Import certificate into the custom keychain
             security import $CERTIFICATE_PATH -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
             
             # CRITICAL: Allow codesign tool to access the private key without a UI prompt
+            # Since we created this keychain with password "", we can authorize it!
             security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" $KEYCHAIN_PATH
             
             # Dynamically extract Identity and Team ID from the certificate
@@ -63,7 +68,6 @@ jobs:
             TEAM_ID=$(echo $FULL_IDENTITY | grep -o '([A-Z0-9]*)' | tr -d '()')
             
             # Extract just the prefix (e.g. "Apple Development" or "Developer ID Application")
-            # Xcode is much better at matching the broad type than the exact full string
             IDENTITY_TYPE=$(echo "$FULL_IDENTITY" | cut -d ':' -f 1)
             
             echo "Extracted Full Identity: $FULL_IDENTITY"
@@ -75,6 +79,7 @@ jobs:
               -scheme DynamicIsland \
               -destination "platform=macOS" \
               -enableCodeCoverage YES \
+              OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
               CODE_SIGN_STYLE=Manual \
               CODE_SIGN_IDENTITY="$IDENTITY_TYPE" \
               DEVELOPMENT_TEAM="$TEAM_ID" \
