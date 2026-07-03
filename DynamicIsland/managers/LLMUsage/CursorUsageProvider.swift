@@ -49,11 +49,27 @@ struct CursorUsageProvider: UsageProvider {
             let tokens = entry["numTokens"] as? Int ?? 0
             let requests = entry["numRequests"] as? Int ?? 0
             guard tokens > 0 || requests > 0 else { continue }
-            models.append(ModelUsage(model: model, totals: UsageTotals(inputTokens: tokens)))
+            // Cursor API provides only total tokens (no input/output split), treat as input tokens
+            let cost = ModelPricing.cost(model: model, inputTokens: tokens, outputTokens: 0)
+            var modelTotals = UsageTotals(inputTokens: tokens)
+            if let cost {
+                modelTotals.costUSD = cost
+            } else {
+                modelTotals.hasUnpricedModel = true
+            }
+            models.append(ModelUsage(model: model, totals: modelTotals))
             week.inputTokens += tokens
+            if let cost {
+                week.costUSD += cost
+            } else {
+                week.hasUnpricedModel = true
+            }
         }
         snapshot.models = models.sorted { $0.model < $1.model }
         snapshot.week = week
+        // Cursor API provides no per-day breakdown, only cumulative totals;
+        // mirror week data to today since that's the only granularity available
+        snapshot.today = week
         return snapshot
     }
 }
