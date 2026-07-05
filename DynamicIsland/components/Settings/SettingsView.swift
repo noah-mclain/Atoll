@@ -450,7 +450,7 @@ struct SettingsView: View {
     private func sidebarRow(for tab: SettingsTab) -> some View {
         HStack(spacing: 10) {
             sidebarIcon(for: tab)
-            Text(tab.title)
+            Text(LocalizedStringKey(tab.title))
             if tab == .downloads {
                 Spacer()
                 Text("BETA")
@@ -3290,7 +3290,7 @@ struct CalendarSettings: View {
 
                     Picker("Chip color", selection: $lockScreenReminderChipStyle) {
                         ForEach(LockScreenReminderChipStyle.allCases) { style in
-                            Text(style.rawValue).tag(style)
+                            Text(style.localizedName).tag(style)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -5324,7 +5324,7 @@ struct LockScreenSettings: View {
                 if enableLockScreenWeatherWidget {
                     Picker("Layout", selection: $lockScreenWeatherWidgetStyle) {
                         ForEach(LockScreenWeatherWidgetStyle.allCases) { style in
-                            Text(style.rawValue).tag(style)
+                            Text(style.localizedName).tag(style)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -5340,7 +5340,7 @@ struct LockScreenSettings: View {
 
                     Picker("Temperature unit", selection: $lockScreenWeatherTemperatureUnit) {
                         ForEach(LockScreenWeatherTemperatureUnit.allCases) { unit in
-                            Text(unit.rawValue).tag(unit)
+                            Text(unit.localizedName).tag(unit)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -5399,7 +5399,7 @@ struct LockScreenSettings: View {
 
                 Picker("Chip color", selection: $lockScreenReminderChipStyle) {
                     ForEach(LockScreenReminderChipStyle.allCases) { style in
-                        Text(style.rawValue).tag(style)
+                        Text(style.localizedName).tag(style)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -7261,7 +7261,7 @@ struct StatsSettings: View {
                     if showCpuGraph {
                         Picker("Temperature unit", selection: $cpuTemperatureUnit) {
                             ForEach(LockScreenWeatherTemperatureUnit.allCases) { unit in
-                                Text(unit.rawValue).tag(unit)
+                                Text(unit.localizedName).tag(unit)
                             }
                         }
                         .pickerStyle(.segmented)

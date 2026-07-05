@@ -269,6 +269,13 @@ enum LockScreenWeatherTemperatureUnit: String, CaseIterable, Defaults.Serializab
         case .fahrenheit: return "fahrenheit"
         }
     }
+
+    var localizedName: String {
+        switch self {
+        case .celsius: return String(localized: "Celsius")
+        case .fahrenheit: return String(localized: "Fahrenheit")
+        }
+    }
 }
 
 enum LockScreenWeatherAirQualityScale: String, CaseIterable, Defaults.Serializable, Identifiable {

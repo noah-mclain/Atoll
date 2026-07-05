@@ -12722,6 +12722,16 @@
         }
       }
     },
+    "Celsius" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "摄氏度"
+          }
+        }
+      }
+    },
     "Change" : {
       "localizations" : {
         "fr" : {
@@ -28067,6 +28077,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "外接显示器样式"
+          }
+        }
+      }
+    },
+    "Fahrenheit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "华氏度"
           }
         }
       }
