@@ -18,7 +18,7 @@ album_idx = method.index("self.album = state.album")
 
 abort("missing expected snippets") unless [prepare_idx, title_idx, artist_idx, album_idx].all?
 
-if prepare_idx < [title_idx, artist_idx, album_idx].min
+if prepare_idx < [title_idx, artist_idx, album_idx].max
   abort("FAIL: lyrics lookup runs before track metadata is updated; rapid track changes can reuse stale lyrics.")
 end
 
