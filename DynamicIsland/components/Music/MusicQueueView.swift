@@ -11,52 +11,75 @@
 import Defaults
 import SwiftUI
 
-/// Music-control slot button that reveals the Apple Music up-next queue in
-/// a popover. Mirrors the interaction contract of `AirPlayPickerButton`:
-/// hover state is reported to the view model so the notch stays open while
-/// the user browses the queue.
+/// Music-control slot button that swaps the calendar panel of the open
+/// notch for the Apple Music up-next queue (and back).
 struct MusicQueueButton: View {
-    @ObservedObject private var musicManager = MusicManager.shared
     @ObservedObject private var queueManager = MusicQueueManager.shared
-    @State private var isPopoverPresented = false
-    @State private var isHoveringPopover = false
-    @EnvironmentObject private var vm: DynamicIslandViewModel
 
     var body: some View {
-        HoverButton(icon: "list.bullet", iconColor: .white, scale: .medium) {
-            isPopoverPresented.toggle()
+        HoverButton(
+            icon: "list.bullet",
+            iconColor: queueManager.isQueueVisible ? .accentColor : .white,
+            scale: .medium
+        ) {
+            withAnimation(.smooth(duration: 0.25)) {
+                queueManager.toggleQueueVisible()
+            }
         }
         .accessibilityLabel("Up Next")
-        .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
-            MusicQueuePopover(
-                queueManager: queueManager,
-                onHoverChanged: { hovering in
-                    isHoveringPopover = hovering
-                    updatePopoverActivity()
-                }
-            ) {
-                isPopoverPresented = false
-                isHoveringPopover = false
-                updatePopoverActivity()
-            }
-        }
-        .onChange(of: isPopoverPresented) { _, presented in
-            if presented {
-                queueManager.startObserving()
-            } else {
-                queueManager.stopObserving()
-                isHoveringPopover = false
-            }
-            updatePopoverActivity()
-        }
         .onDisappear {
-            queueManager.stopObserving()
-            vm.isMediaOutputPopoverActive = false
+            queueManager.hideQueue()
         }
     }
+}
 
-    private func updatePopoverActivity() {
-        vm.isMediaOutputPopoverActive = isPopoverPresented && isHoveringPopover
+/// Inline queue panel shown in place of the calendar in the open notch.
+struct MusicQueuePanel: View {
+    @ObservedObject var queueManager: MusicQueueManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Up Next")
+                    .font(.headline)
+                Spacer()
+                HoverButton(icon: "xmark", scale: .small) {
+                    withAnimation(.smooth(duration: 0.25)) {
+                        queueManager.hideQueue()
+                    }
+                }
+                .accessibilityLabel("Close queue")
+            }
+            .padding(.horizontal, 4)
+
+            if queueManager.isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .controlSize(.small)
+                    Spacer()
+                }
+                .frame(maxHeight: .infinity)
+            } else if queueManager.upNext.isEmpty {
+                Text("Queue unavailable — play an album or playlist in Apple Music.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding(4)
+                    .frame(maxHeight: .infinity, alignment: .top)
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 2) {
+                        ForEach(queueManager.upNext) { track in
+                            MusicQueueRow(track: track) {
+                                queueManager.play(track)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

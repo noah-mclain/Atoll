@@ -695,6 +695,7 @@ struct NotchHomeView: View {
     @ObservedObject var coordinator = DynamicIslandViewCoordinator.shared
     @ObservedObject private var extensionNotchExperienceManager = ExtensionNotchExperienceManager.shared
     @ObservedObject private var musicManager = MusicManager.shared
+    @ObservedObject private var queueManager = MusicQueueManager.shared
     @Default(.showStandardMediaControls) private var showStandardMediaControls
     @Default(.autoHideInactiveNotchMediaPlayer) private var autoHideInactiveNotchMediaPlayer
     let albumArtNamespace: Namespace.ID
@@ -731,7 +732,15 @@ struct NotchHomeView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 
-                if Defaults[.showCalendar] {
+                if queueManager.isQueueVisible {
+                    // The up-next queue borrows the calendar's slot while open.
+                    MusicQueuePanel(queueManager: queueManager)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .onHover { isHovering in
+                            vm.isHoveringCalendar = isHovering
+                        }
+                        .transition(.opacity.combined(with: .blurReplace))
+                } else if Defaults[.showCalendar] {
                     Group {
                         if shouldShowMusicPlayer {
                             CalendarView()

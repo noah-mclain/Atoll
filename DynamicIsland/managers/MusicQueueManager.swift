@@ -41,6 +41,8 @@ final class MusicQueueManager: ObservableObject {
     @Published private(set) var upNext: [QueueTrack] = []
     @Published private(set) var isLoading = false
     @Published private(set) var lastRefreshed: Date?
+    /// While true the open notch swaps the calendar panel for the queue.
+    @Published private(set) var isQueueVisible = false
 
     /// How many upcoming tracks to surface in the popover.
     private static let fetchLimit = 10
@@ -50,6 +52,23 @@ final class MusicQueueManager: ObservableObject {
     private var refreshTimer: Timer?
 
     private init() {}
+
+    // MARK: - Inline panel visibility
+
+    func toggleQueueVisible() {
+        isQueueVisible ? hideQueue() : showQueue()
+    }
+
+    func showQueue() {
+        isQueueVisible = true
+        startObserving()
+    }
+
+    func hideQueue() {
+        guard isQueueVisible else { return }
+        isQueueVisible = false
+        stopObserving()
+    }
 
     // MARK: - Refresh lifecycle
 
