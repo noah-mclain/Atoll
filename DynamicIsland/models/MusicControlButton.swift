@@ -31,6 +31,7 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
     case mediaOutput
     case airPlay
     case lyrics
+    case upNext
     case seekBackward
     case seekForward
     case none
@@ -63,12 +64,13 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
         .repeatMode,
         .lyrics,
         .mediaOutput,
-        .airPlay
+        .airPlay,
+        .upNext
     ]
 
     /// Controls that are only available when Apple Music is the active media source.
     var isAppleMusicExclusive: Bool {
-        self == .airPlay
+        self == .airPlay || self == .upNext
     }
 
     var id: String { rawValue }
@@ -91,6 +93,8 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
             return String(localized: "AirPlay")
         case .lyrics:
             return String(localized: "Lyrics")
+        case .upNext:
+            return String(localized: "Up Next")
         case .seekBackward:
             return String(localized: "Rewind 10s")
         case .seekForward:
@@ -118,6 +122,8 @@ enum MusicControlButton: String, CaseIterable, Identifiable, Codable, Defaults.S
             return "airplayaudio"
         case .lyrics:
             return "quote.bubble"
+        case .upNext:
+            return "list.bullet"
         case .seekBackward:
             return "gobackward.10"
         case .seekForward:

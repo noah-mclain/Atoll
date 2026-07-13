@@ -808,6 +808,7 @@ extension Defaults.Keys {
     static let selectedCameraID = Key<String>("selectedCameraID", default: "")
     static let settingsIconInNotch = Key<Bool>("settingsIconInNotch", default: true)
     static let lightingEffect = Key<Bool>("lightingEffect", default: true)
+    static let liveAlbumArt = Key<Bool>("liveAlbumArt", default: true)
     static let accentColor = Key<Color>("accentColor", default: Color.blue)
     static let enableShadow = Key<Bool>("enableShadow", default: true)
     static let cornerRadiusScaling = Key<Bool>("cornerRadiusScaling", default: true)
@@ -949,6 +950,9 @@ extension Defaults.Keys {
     
         // MARK: Downloads
     static let enableDownloadListener = Key<Bool>("enableDownloadListener", default: true)
+    static let enableNetworkLiveActivity = Key<Bool>("enableNetworkLiveActivity", default: true)
+    static let enableDropZone = Key<Bool>("enableDropZone", default: true)
+    static let enableAgentLiveActivity = Key<Bool>("enableAgentLiveActivity", default: true)
     static let enableSafariDownloads = Key<Bool>("enableSafariDownloads", default: true)
     static let selectedDownloadIndicatorStyle = Key<DownloadIndicatorStyle>("selectedDownloadIndicatorStyle", default: DownloadIndicatorStyle.progress)
     static let selectedDownloadIconStyle = Key<DownloadIconStyle>("selectedDownloadIconStyle", default: DownloadIconStyle.onlyAppIcon)

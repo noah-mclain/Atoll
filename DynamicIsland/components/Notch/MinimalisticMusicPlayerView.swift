@@ -951,6 +951,8 @@ private struct MinimalisticReminderDetailsView: View {
             MinimalisticMediaOutputButton()
         case .airPlay:
             MinimalisticAirPlayButton()
+        case .upNext:
+            MinimalisticUpNextButton()
         case .lyrics:
             controlButton(
                 icon: enableLyrics ? "quote.bubble.fill" : "quote.bubble",
@@ -1090,6 +1092,58 @@ private struct MinimalisticReminderDetailsView: View {
                 }
             }
             .onDisappear {
+                vm.isMediaOutputPopoverActive = false
+            }
+        }
+
+        private func updateActivity() {
+            vm.isMediaOutputPopoverActive = isPopoverPresented && isHoveringPopover
+        }
+    }
+
+    private struct MinimalisticUpNextButton: View {
+        @ObservedObject private var queueManager = MusicQueueManager.shared
+        @EnvironmentObject private var vm: DynamicIslandViewModel
+        @State private var isPopoverPresented = false
+        @State private var isHoveringPopover = false
+
+        var body: some View {
+            MinimalisticSquircircleButton(
+                icon: "list.bullet",
+                fontSize: 18,
+                fontWeight: .medium,
+                frameSize: CGSize(width: 40, height: 40),
+                cornerRadius: 16,
+                foregroundColor: .white.opacity(0.85),
+                symbolEffectStyle: .replace
+            ) {
+                isPopoverPresented.toggle()
+            }
+            .accessibilityLabel("Up Next")
+            .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
+                MusicQueuePopover(
+                    queueManager: queueManager,
+                    onHoverChanged: { hovering in
+                        isHoveringPopover = hovering
+                        updateActivity()
+                    }
+                ) {
+                    isPopoverPresented = false
+                    isHoveringPopover = false
+                    updateActivity()
+                }
+            }
+            .onChange(of: isPopoverPresented) { _, presented in
+                if presented {
+                    queueManager.startObserving()
+                } else {
+                    queueManager.stopObserving()
+                    isHoveringPopover = false
+                }
+                updateActivity()
+            }
+            .onDisappear {
+                queueManager.stopObserving()
                 vm.isMediaOutputPopoverActive = false
             }
         }

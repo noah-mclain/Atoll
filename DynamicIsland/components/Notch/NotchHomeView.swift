@@ -50,6 +50,9 @@ struct AlbumArtView: View {
             if Defaults[.lightingEffect] {
                 albumArtBackground
             }
+            if Defaults[.liveAlbumArt] {
+                LiveAlbumArtGlow(artwork: musicManager.albumArt, isPlaying: musicManager.isPlaying)
+            }
             albumArtButton
         }
     }
@@ -94,6 +97,7 @@ struct AlbumArtView: View {
             }
             .buttonStyle(PlainButtonStyle())
             .scaleEffect(musicManager.isPlaying ? 1 : 0.85)
+            .liveAlbumArtPulse(isPlaying: Defaults[.liveAlbumArt] && musicManager.isPlaying)
             
             albumArtDarkOverlay
         }
@@ -495,6 +499,8 @@ struct MusicControlsView: View {
             MediaOutputPickerButton()
         case .airPlay:
             AirPlayPickerButton()
+        case .upNext:
+            MusicQueueButton()
         case .lyrics:
             HoverButton(
                 icon: enableLyrics ? "quote.bubble.fill" : "quote.bubble",

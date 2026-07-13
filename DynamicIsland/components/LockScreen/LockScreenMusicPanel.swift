@@ -619,6 +619,10 @@ struct LockScreenMusicPanel: View {
             } else {
                 standaloneAirPlayButton
             }
+        case .upNext:
+            // Queue browsing needs a popover, which the lock screen panel
+            // can't host — render the slot empty instead.
+            Spacer(minLength: 0)
         case .lyrics:
             controlButton(
                 icon: enableLyrics ? "quote.bubble.fill" : "quote.bubble",
