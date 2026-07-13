@@ -51,6 +51,7 @@ final class NotificationObserver: NSObject, ObservableObject {
         "usernotificationsd",
         "NotificationCenter",
         "notificationcenterui",
+        "usernotificationcenter",   // macOS 26 banner renderer
     ]
 
     private struct AttachedProcess {
@@ -61,6 +62,9 @@ final class NotificationObserver: NSObject, ObservableObject {
     }
 
     private var attached: [pid_t: AttachedProcess] = [:]
+    /// Last (AXError, window count) per poll label, so scan problems and
+    /// banner window arrivals are logged exactly once per state change.
+    private var lastScanState: [String: (status: AXError, count: Int)] = [:]
     private var seenWindowSignatures: Set<String> = []
     private var dismissTimers: [UUID: Timer] = [:]
     private var cancellables: Set<AnyCancellable> = []
@@ -162,6 +166,10 @@ final class NotificationObserver: NSObject, ObservableObject {
 
     private func install(pid: pid_t, name: String) {
         let appElement = AXUIElementCreateApplication(pid)
+
+        // Chromium/Electron-style hosts only populate their AX tree once an
+        // assistive client announces itself; harmless where unsupported.
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         var observer: AXObserver?
         let status = AXObserverCreate(pid, axNotificationCallback, &observer)
         guard status == .success, let observer else {
@@ -252,16 +260,33 @@ final class NotificationObserver: NSObject, ObservableObject {
             kAXWindowsAttribute as CFString,
             &windowsRef
         )
-        guard status == .success else {
-            if !source.hasPrefix("poll:") {
-                atollNotifLog("AXUIElementCopyAttributeValue(windows) on \(source) returned \(status.rawValue).")
+        var windows = (windowsRef as? [AXUIElement]) ?? []
+
+        // Some banner hosts (macOS 26's usernotificationcenter among them)
+        // don't list banners under AXWindows — fall back to the app
+        // element's direct children.
+        if windows.isEmpty {
+            var childrenRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(appElement, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+               let children = childrenRef as? [AXUIElement] {
+                windows = children
             }
-            return
         }
-        guard let windows = windowsRef as? [AXUIElement] else { return }
+
+        logScanTransition(source: source, status: status, count: windows.count)
         for window in windows {
             process(window: window, source: source)
         }
+    }
+
+    /// Logs once whenever a source's scan status or window count changes,
+    /// so the debug console shows banner arrivals and AX failures without
+    /// per-second spam.
+    private func logScanTransition(source: String, status: AXError, count: Int) {
+        let previous = lastScanState[source]
+        guard previous?.status != status || previous?.count != count else { return }
+        lastScanState[source] = (status, count)
+        atollNotifLog("scan \(source): AXWindows status=\(status.rawValue), elements=\(count)")
     }
 
     private func process(window: AXUIElement, source: String) {
@@ -272,7 +297,12 @@ final class NotificationObserver: NSObject, ObservableObject {
             seenWindowSignatures.removeAll(keepingCapacity: true)
         }
 
-        atollNotifLog("NEW BANNER from \(source):\n    \(signature)")
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &roleRef)
+        var subroleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subroleRef)
+        atollNotifLog("NEW BANNER from \(source) " +
+                      "[role=\(roleRef as? String ?? "?") subrole=\(subroleRef as? String ?? "-")]:\n    \(signature)")
 
         if let notification = NotificationParser.parse(window: window) {
             receive(notification)
