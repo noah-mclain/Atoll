@@ -111,7 +111,10 @@ class DynamicIslandViewCoordinator: ObservableObject {
     
     @Published var currentView: NotchViews = .home {
         didSet {
-            if Defaults[.enableMinimalisticUI] && currentView != .home {
+            // Allow .communication through even in minimalistic mode — call /
+            // notification banners are higher-priority interruptions than the
+            // tab restriction is meant to silence.
+            if Defaults[.enableMinimalisticUI] && currentView != .home && currentView != .communication {
                 currentView = .home
                 return
             }

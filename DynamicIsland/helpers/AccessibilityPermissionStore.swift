@@ -32,10 +32,30 @@ final class AccessibilityPermissionStore: ObservableObject {
 
     private var pollingTask: Task<Void, Never>?
 
-    private init() {}
+    private init() {
+        // Re-check whenever the user returns from System Settings so a toggle
+        // made outside Atoll (without ever clicking the in-app "Grant" button)
+        // is still picked up. Without this, isAuthorized stays at its initial
+        // value until requestAuthorizationPrompt() is called.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleAppDidActivate),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+    }
 
     deinit {
         pollingTask?.cancel()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
+    @objc private func handleAppDidActivate(_ note: Notification) {
+        guard
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+            app.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        else { return }
+        Task { @MainActor in self.refreshStatus() }
     }
 
     func refreshStatus() {

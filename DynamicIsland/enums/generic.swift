@@ -80,6 +80,10 @@ public enum NotchViews {
     case clipboard
     case terminal
     case extensionExperience
+    /// Notch is currently showing an incoming-call pill or a notification
+    /// banner from NotificationObserver / CallMonitor. Entered programmatically
+    /// when a banner arrives; exited when it's dismissed.
+    case communication
 }
 
 enum NotesLayoutState: Equatable {
