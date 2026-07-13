@@ -89,20 +89,76 @@ struct ContentView: View {
     @Default(.hideNonNotchUntilHover) var hideNonNotchUntilHover
     @Default(.terminalStickyMode) var terminalStickyMode
     
+    // Battery settings reactivity
+    @Default(.showPowerStatusNotifications) var showPowerStatusNotifications
+    @Default(.showChargingBatteryHUD) var showChargingBatteryHUD
+    @Default(.showLowBatteryHUD) var showLowBatteryHUD
+    @Default(.showFullBatteryHUD) var showFullBatteryHUD
+    @Default(.showOnAllDisplays) var showOnAllDisplays
+    @Default(.lowBatteryHUDStyle) var lowBatteryHUDStyle
+    @Default(.fullBatteryHUDStyle) var fullBatteryHUDStyle
+    
     // Dynamic sizing based on view type and graph count with smooth transitions
     var dynamicNotchSize: CGSize {
-        let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize : openNotchSize
+        let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: isDynamicIslandMode) : openNotchSize
         
         // When inline sneak peek is active in closed notch, use the wider inline width
         // so the outer maxWidth frame doesn't clip the expanded content
+        let airPodsListeningModeSneakActive = vm.notchState == .closed
+            && coordinator.sneakPeek.show
+            && coordinator.sneakPeek.type == .bluetoothAudio
+            && coordinator.sneakPeek.value < 0
+            && AirPodsListeningMode.fromHUDSymbol(coordinator.sneakPeek.icon) != nil
         let inlineSneakPeekActive = vm.notchState == .closed
-            && coordinator.expandingView.show
-            && (coordinator.expandingView.type == .music || coordinator.expandingView.type == .timer)
+            && (
+                coordinator.expandingView.show
+                    && (coordinator.expandingView.type == .music || coordinator.expandingView.type == .timer)
+                    && Defaults[.sneakPeekStyles] == .inline
+                || airPodsListeningModeSneakActive
+            )
             && Defaults[.enableSneakPeek]
-            && Defaults[.sneakPeekStyles] == .inline
         if inlineSneakPeekActive {
-            let inlineWidth: CGFloat = 460
+            let inlineWidth: CGFloat = airPodsListeningModeSneakActive
+                ? InlineHUD.airPodsListeningModeWidth(
+                    closedNotchWidth: vm.closedNotchSize.width,
+                    gestureProgress: gestureProgress,
+                    minimalistic: Defaults[.enableMinimalisticUI]
+                ) + notchHorizontalPadding * 2
+                : 460
             return CGSize(width: max(baseSize.width, inlineWidth), height: baseSize.height)
+        }
+        
+        // Handle battery HUD expansion sizing
+        if vm.notchState == .closed && 
+           coordinator.expandingView.show && 
+           coordinator.expandingView.type == .battery &&
+           isBatteryHUDVisibleOnCurrentScreen {
+            
+            if let kind = batteryModel.activeTemporaryHUDKind {
+                let style: BatteryNotificationStyle = {
+                    switch kind {
+                    case .charging: return .compact
+                    case .lowBattery: return Defaults[.lowBatteryHUDStyle]
+                    case .fullBattery: return Defaults[.fullBatteryHUDStyle]
+                    }
+                }()
+                
+                var width = vm.closedNotchSize.width
+                var height = vm.effectiveClosedNotchHeight
+                
+                switch (kind, style) {
+                case (.charging, _), (.lowBattery, .compact), (.fullBattery, .compact):
+                    width += 180
+                case (.lowBattery, .standard):
+                    width += 100
+                    height += 75
+                case (.fullBattery, .standard):
+                    width += 80
+                    height += 70
+                }
+                
+                return CGSize(width: width, height: height)
+            }
         }
         
         if coordinator.currentView == .timer {
@@ -387,9 +443,78 @@ struct ContentView: View {
         return DynamicIslandPillShape(cornerRadius: radius)
     }
 
+    private var isBatteryHUDVisibleOnCurrentScreen: Bool {
+        guard coordinator.expandingView.show, coordinator.expandingView.type == .battery else { return false }
+        guard showPowerStatusNotifications else { return false }
+        guard batteryModel.activeTemporaryHUDKind != nil else { return false }
+        if showOnAllDisplays { return true }
+        guard let targetScreenName = batteryModel.activeTemporaryHUDTargetScreenName else { return true }
+        return currentScreenName == targetScreenName
+    }
+
+    private var isCurrentScreenExpansionVisible: Bool {
+        guard coordinator.expandingView.show else { return false }
+        if coordinator.expandingView.type == .battery {
+            return isBatteryHUDVisibleOnCurrentScreen
+        }
+        return true
+    }
+
+    private var currentScreenExpansionType: SneakContentType? {
+        isCurrentScreenExpansionVisible ? coordinator.expandingView.type : nil
+    }
+
+    private var displayedBatteryHUDLevel: Int {
+        let resolvedLevel = batteryModel.activeTemporaryHUDLevelOverride
+            ?? Int(batteryModel.levelBattery.rounded())
+        return min(max(resolvedLevel, 0), 100)
+    }
+
+    private var displayedBatteryHUDUsesLowPowerMode: Bool {
+        batteryModel.activeTemporaryHUDLowPowerModeOverride ?? batteryModel.isInLowPowerMode
+    }
+
+
+    private var activeClosedBatterySurfaceShape: AnyShape? {
+        guard vm.notchState == .closed else { return nil }
+        guard isBatteryHUDVisibleOnCurrentScreen else { return nil }
+        guard let kind = batteryModel.activeTemporaryHUDKind else { return nil }
+
+        if isDynamicIslandMode {
+            let radius = dynamicIslandPillCornerRadiusInsets.opened
+            return AnyShape(DynamicIslandPillShape(cornerRadius: radius))
+        } else {
+            let topRadius = activeCornerRadiusInsets.closed.top
+            let bottomRadius: CGFloat = {
+                switch resolvedBatteryNotificationStyle(for: kind) {
+                case .compact:
+                    return activeCornerRadiusInsets.closed.bottom
+                case .standard:
+                    return kind == .fullBattery ? 36 : 40
+                }
+            }()
+            return AnyShape(NotchShape(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius))
+        }
+    }
+
+    private func resolvedBatteryNotificationStyle(for kind: BatteryTemporaryHUDKind) -> BatteryNotificationStyle {
+        switch kind {
+        case .charging:
+            return .compact
+        case .lowBattery:
+            return lowBatteryHUDStyle
+        case .fullBattery:
+            return fullBatteryHUDStyle
+        }
+    }
+
+
     /// Resolves the clip/content shape per-screen: pill on non-notch screens
     /// when dynamic island mode is active, standard notch shape otherwise.
     private var resolvedClipShape: AnyShape {
+        if let activeClosedBatterySurfaceShape {
+            return activeClosedBatterySurfaceShape
+        }
         if isDynamicIslandMode {
             return AnyShape(currentPillShape)
         }
@@ -417,7 +542,9 @@ struct ContentView: View {
             // Extra horizontal inset for Dynamic Island mode so the shadow
             // is not clipped by the outer frame constraint
             .padding(.horizontal, isIslandMode ? dynamicIslandShadowInset : 0)
+            .padding(.bottom, isIslandMode ? dynamicIslandShadowInset : 0)
             .padding(.top, pillTopOffset)
+            .accessibilityIdentifier("AtollNotch")
     }
 
     private var configuredMainLayout: some View {
@@ -514,6 +641,11 @@ struct ContentView: View {
                 }
                 if newState == .closed {
                     removeStickyTerminalClickMonitor()
+                } else {
+                    // Install the outside-click monitor for terminal opens that don't
+                    // change `currentView` (e.g. shortcut re-opening with the terminal
+                    // tab already selected, where the cursor never enters the notch).
+                    syncStickyTerminalOutsideClickMonitor()
                 }
                 #if os(macOS)
                 if newState == .open {
@@ -593,8 +725,8 @@ struct ContentView: View {
             configuredMainLayout
         }
         .frame(
-            maxWidth: dynamicNotchSize.width + (isDynamicIslandMode ? dynamicIslandShadowInset * 2 : 0),
-            maxHeight: dynamicNotchSize.height + currentShadowPadding + (isDynamicIslandMode ? dynamicIslandTopOffset : 0),
+            maxWidth: (dynamicNotchSize.width + (vm.notchState == .open ? 24 : 0) + (isDynamicIslandMode ? dynamicIslandShadowInset * 2 : 0)).rounded(),
+            maxHeight: (dynamicNotchSize.height + (vm.notchState == .open ? 12 : 0) + (isDynamicIslandMode ? dynamicIslandTopOffset + dynamicIslandShadowInset * 2 : currentShadowPadding)).rounded(),
             alignment: .top
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -659,6 +791,9 @@ struct ContentView: View {
                 }
                 enqueueMusicControlWindowSync(forceRefresh: true)
                 startHiddenEdgeHoverPolling()
+                // Deterministic teardown for borderless panels (`.onDisappear` is
+                // unreliable); the window-cleanup path calls this before closing.
+                vm.onViewTeardown = { performViewTeardown() }
             }
             .onChange(of: terminalStickyMode) { _, _ in
                 syncStickyTerminalOutsideClickMonitor()
@@ -763,16 +898,7 @@ struct ContentView: View {
                 }
             }
             .onDisappear {
-                hoverTask?.cancel()
-                stopHoverClickMonitor()
-                removeStickyTerminalClickMonitor()
-                stopHiddenEdgeHoverPolling()
-                cancelMusicControlWindowSync()
-                hideMusicControlWindow()
-                cancelMusicControlVisibilityTimer()
-                clearMusicControlVisibilityDeadline()
-                musicControlSuppressionTask?.cancel()
-                isHoveringClosedMusicWaveformControl = false
+                performViewTeardown()
             }
     }
 
@@ -803,13 +929,13 @@ struct ContentView: View {
                           guard let musicSecondary else { return false }
                           switch musicSecondary {
                           case .timer:
-                              return coordinator.expandingView.type == .timer
+                              return currentScreenExpansionType == .timer
                           case .reminder:
-                              return coordinator.expandingView.type == .reminder
+                              return currentScreenExpansionType == .reminder
                           case .recording:
-                              return coordinator.expandingView.type == .recording
+                              return currentScreenExpansionType == .recording
                           case .focus:
-                              return coordinator.expandingView.type == .doNotDisturb
+                              return currentScreenExpansionType == .doNotDisturb
                           case .capsLock:
                               return false
                           case .extensionPayload:
@@ -818,35 +944,30 @@ struct ContentView: View {
                               return false
                           }
                       }()
-                      let canShowMusicDuringExpansion = !coordinator.expandingView.show
-                          || coordinator.expandingView.type == .music
+                      let canShowMusicDuringExpansion = !isCurrentScreenExpansionVisible
+                          || currentScreenExpansionType == .music
                           || expansionMatchesSecondary
+                      let isAirPodsListeningModeSneak = coordinator.sneakPeek.type == .bluetoothAudio
+                          && coordinator.sneakPeek.value < 0
+                          && AirPodsListeningMode.fromHUDSymbol(coordinator.sneakPeek.icon) != nil
 
-                      if coordinator.expandingView.type == .battery && coordinator.expandingView.show && vm.notchState == .closed && Defaults[.showPowerStatusNotifications] {
-                        HStack(spacing: 0) {
-                            HStack {
-                                Text(batteryModel.statusText)
-                                    .font(.subheadline)
-                            }
-
-                            Rectangle()
-                                .fill(.black)
-                                .frame(width: vm.closedNotchSize.width + 10)
-
-                            HStack {
-                                DynamicIslandBatteryView(
-                                    batteryWidth: 30,
-                                    isCharging: batteryModel.isCharging,
-                                    isInLowPowerMode: batteryModel.isInLowPowerMode,
-                                    isPluggedIn: batteryModel.isPluggedIn,
-                                    levelBattery: batteryModel.levelBattery,
-                                    isForNotification: true
-                                )
-                            }
-                            .frame(width: 76, alignment: .trailing)
-                        }
-                        .frame(height: vm.effectiveClosedNotchHeight + (isHovering ? 8 : 0), alignment: .center)
-                      } else if isSneakPeekVisibleOnCurrentScreen && Defaults[.inlineHUD] && (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && !coordinator.sneakPeek.type.isExtensionPayload && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
+                      if currentScreenExpansionType == .battery
+                            && isBatteryHUDVisibleOnCurrentScreen
+                            && vm.notchState == .closed
+                            && Defaults[.showPowerStatusNotifications]
+                            && batteryModel.activeTemporaryHUDKind != nil {
+                        BatteryTemporaryActivityView(
+                            kind: batteryModel.activeTemporaryHUDKind ?? .charging,
+                            batteryLevel: displayedBatteryHUDLevel,
+                            isLowPowerMode: displayedBatteryHUDUsesLowPowerMode,
+                            closedNotchWidth: vm.closedNotchSize.width + (isHovering ? 8 : 0),
+                            baseHeight: vm.effectiveClosedNotchHeight + (isHovering ? 8 : 0),
+                            isDynamicIslandMode: isDynamicIslandMode,
+                            topCornerRadius: activeCornerRadiusInsets.closed.top,
+                            styleOverride: batteryModel.activeTemporaryHUDKind.map { resolvedBatteryNotificationStyle(for: $0) }
+                        )
+                        .id(batteryModel.activeTemporaryHUDToken)
+                      } else if isSneakPeekVisibleOnCurrentScreen && (Defaults[.inlineHUD] || isAirPodsListeningModeSneak) && (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && !coordinator.sneakPeek.type.isExtensionPayload && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
                           InlineHUD(type: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, hoverAnimation: $isHovering, gestureProgress: $gestureProgress)
                               .transition(
                                   coordinator.sneakPeek.type == .capsLock
@@ -860,31 +981,31 @@ struct ContentView: View {
                           MusicLiveActivity(secondary: musicSecondary)
                               .id("closed-music-live-activity")
                               .transition(closedLiveActivitySwapTransition)
-                      } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .timer) && vm.notchState == .closed && timerManager.isTimerActive && coordinator.timerLiveActivityEnabled && !vm.hideOnClosed {
+                      } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .timer) && vm.notchState == .closed && timerManager.isTimerActive && coordinator.timerLiveActivityEnabled && !vm.hideOnClosed {
                           TimerLiveActivity()
-                      } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .reminder) && vm.notchState == .closed && reminderManager.isActive && enableReminderLiveActivity && !vm.hideOnClosed {
+                      } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .reminder) && vm.notchState == .closed && reminderManager.isActive && enableReminderLiveActivity && !vm.hideOnClosed {
                           ReminderLiveActivity()
-                      } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .recording) && vm.notchState == .closed && (recordingManager.isRecording || !recordingManager.isRecorderIdle) && Defaults[.enableScreenRecordingDetection] && !vm.hideOnClosed && !musicPairingEligible {
+                      } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .recording) && vm.notchState == .closed && (recordingManager.isRecording || !recordingManager.isRecorderIdle) && Defaults[.enableScreenRecordingDetection] && !vm.hideOnClosed && !musicPairingEligible {
                           RecordingLiveActivity()
-                      } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .download) && vm.notchState == .closed && downloadManager.isDownloading && Defaults[.enableDownloadListener] && !vm.hideOnClosed {
+                      } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .download) && vm.notchState == .closed && downloadManager.isDownloading && Defaults[.enableDownloadListener] && !vm.hideOnClosed {
                           DownloadLiveActivity()
                               .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
-                      } else if !coordinator.expandingView.show && vm.notchState == .closed && localSendLiveActivityActive && !vm.hideOnClosed {
+                      } else if !isCurrentScreenExpansionVisible && vm.notchState == .closed && localSendLiveActivityActive && !vm.hideOnClosed {
                           LocalSendLiveActivity()
                               .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
-                      } else if !coordinator.expandingView.show && vm.notchState == .closed && Defaults[.enableNetworkLiveActivity] && (networkManager.showChangeEvent || networkManager.isOffline) && !vm.hideOnClosed && !lockScreenManager.isLocked {
+                      } else if !isCurrentScreenExpansionVisible && vm.notchState == .closed && Defaults[.enableNetworkLiveActivity] && (networkManager.showChangeEvent || networkManager.isOffline) && !vm.hideOnClosed && !lockScreenManager.isLocked {
                           NetworkLiveActivity()
                               .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
-                      } else if !coordinator.expandingView.show && vm.notchState == .closed && Defaults[.enableAgentLiveActivity] && agentMonitor.hasActivity && !vm.hideOnClosed && !lockScreenManager.isLocked {
+                      } else if !isCurrentScreenExpansionVisible && vm.notchState == .closed && Defaults[.enableAgentLiveActivity] && agentMonitor.hasActivity && !vm.hideOnClosed && !lockScreenManager.isLocked {
                           AgentLiveActivity()
                               .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
-                      } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .doNotDisturb) && vm.notchState == .closed && Defaults[.enableDoNotDisturbDetection] && Defaults[.showDoNotDisturbIndicator] && (doNotDisturbManager.isDoNotDisturbActive || doNotDisturbManager.isFocusToastDismissing) && !vm.hideOnClosed && !lockScreenManager.isLocked {
+                      } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .doNotDisturb) && vm.notchState == .closed && Defaults[.enableDoNotDisturbDetection] && Defaults[.showDoNotDisturbIndicator] && (doNotDisturbManager.isDoNotDisturbActive || doNotDisturbManager.isFocusToastDismissing) && !vm.hideOnClosed && !lockScreenManager.isLocked {
                           DoNotDisturbLiveActivity()
-                    } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .lockScreen) && vm.notchState == .closed && (lockScreenManager.isLocked || !lockScreenManager.isLockIdle) && Defaults[.enableLockScreenLiveActivity] && !vm.hideOnClosed {
+                    } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .lockScreen) && vm.notchState == .closed && (lockScreenManager.isLocked || !lockScreenManager.isLockIdle) && Defaults[.enableLockScreenLiveActivity] && !vm.hideOnClosed {
                         LockScreenLiveActivity()
                             .id("lock-screen-live-activity")
                             .transition(closedLiveActivitySwapTransition)
-                    } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .privacy) && vm.notchState == .closed && privacyManager.hasAnyIndicator && (Defaults[.enableCameraDetection] || Defaults[.enableMicrophoneDetection]) && !vm.hideOnClosed {
+                    } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .privacy) && vm.notchState == .closed && privacyManager.hasAnyIndicator && (Defaults[.enableCameraDetection] || Defaults[.enableMicrophoneDetection]) && !vm.hideOnClosed {
                         PrivacyLiveActivity()
                       } else if let extensionPayload = extensionStandalonePayload {
                           let layout = extensionStandaloneLayout(
@@ -901,16 +1022,17 @@ struct ContentView: View {
                           ShelfInlineLiveActivity()
                               .transition(.opacity.animation(.smooth(duration: 0.25)))
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
+                      } else if !isCurrentScreenExpansionVisible && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
                           DynamicIslandFaceAnimation().animation(.interactiveSpring, value: musicManager.isPlayerIdle)
                       } else if vm.notchState == .open {
                           DynamicIslandHeader()
-                              .frame(height: max(24, vm.effectiveClosedNotchHeight))
+                              .frame(height: (Defaults[.enableMinimalisticUI] && isDynamicIslandMode) ? nil : max(24, vm.effectiveClosedNotchHeight))
                        } else {
                            Rectangle().fill(.clear).frame(width: vm.closedNotchSize.width - 20, height: vm.effectiveClosedNotchHeight)
                        }
                       
                       if isSneakPeekVisibleOnCurrentScreen {
-                          if (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && (coordinator.sneakPeek.type != .capsLock) && !coordinator.sneakPeek.type.isExtensionPayload && !Defaults[.inlineHUD] && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
+                          if (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && (coordinator.sneakPeek.type != .capsLock) && !coordinator.sneakPeek.type.isExtensionPayload && !Defaults[.inlineHUD] && !isAirPodsListeningModeSneak && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
                               SystemEventIndicatorModifier(eventType: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, sendEventBack: { _ in
                                   //
                               })
@@ -1013,6 +1135,8 @@ struct ContentView: View {
                                   NotchTimerView()
                               case .stats:
                                   NotchStatsView()
+                              case .llmUsage:
+                                  NotchLLMUsageView()
                               case .colorPicker:
                                   NotchColorPickerView()
                             case .notes:
@@ -1056,18 +1180,18 @@ struct ContentView: View {
         let window = TimeInterval(Defaults[.reminderSneakPeekDuration])
 
         if window > 0 && remaining <= window {
-            return "\(title) • now"
+            return "\(title) • \(String(format: String(localized: "now")))"
         }
 
         let minutes = Int(ceil(remaining / 60))
         let timeString = reminderTimeFormatter.string(from: entry.event.start)
 
         if minutes <= 0 {
-            return "\(title) • now • \(timeString)"
+            return "\(title) • \(String(format: String(localized: "now"))) • \(timeString)"
         } else if minutes == 1 {
-            return "\(title) • in 1 min • \(timeString)"
+            return "\(title) • \(String(format: String(localized: "in %@"), String(localized: "1 min"))) • \(timeString)"
         } else {
-            return "\(title) • in \(minutes) min • \(timeString)"
+            return "\(title) • \(String(format: String(localized: "in %lld"), (minutes))) \(String(format: String(localized: "min plural"))) • \(timeString)"
         }
     }
 
@@ -1192,6 +1316,14 @@ struct ContentView: View {
                                 .foregroundStyle(timerManager.timerColor)
                                 .padding(.trailing, 8)
                                 .opacity((coordinator.expandingView.show && coordinator.expandingView.type == .timer && Defaults[.enableSneakPeek] && Defaults[.sneakPeekStyles] == .inline) ? 1 : 0)
+                        } else if Defaults[.showSongMetadataInClosedNotch] && isNonNotchScreen && !musicManager.songTitle.isEmpty {
+                            MarqueeText(
+                                .constant("\(musicManager.songTitle) • \(musicManager.artistName)"),
+                                textColor: Defaults[.coloredSpectrogram] ? Color(nsColor: musicManager.avgColor) : Color.gray,
+                                minDuration: 3,
+                                frameWidth: max(0, effectiveCenterWidth - 16)
+                            )
+                            .padding(.horizontal, 8)
                         }
                     }
                     .clipped()
@@ -1453,20 +1585,31 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func SpectrumVisualizer(
+        useMusicVisualizer: Bool,
+        forceSpectrum: Bool
+    ) -> some View {
+        let width = CGFloat(Defaults[.visualizerBarCount]) * 4
+        if useMusicVisualizer || forceSpectrum {
+            Rectangle()
+                .fill((Defaults[.coloredSpectrogram] ? Color(nsColor: musicManager.avgColor) : Color.gray).spectrogramGradient())
+                .frame(width: 50, alignment: .center)
+                .matchedGeometryEffect(id: "spectrum", in: albumArtNamespace)
+                .mask {
+                    AudioVisualizerView(isPlaying: $musicManager.isPlaying)
+                        .frame(width: width, height: 12)
+                }
+        }
+    }
+
+    @ViewBuilder
     private func spectrumView(
         forceSpectrum: Bool,
         trailingInset: CGFloat = 0,
         enableClosedPlayPauseOverlay: Bool = false
     ) -> some View {
         if useMusicVisualizer || forceSpectrum {
-            Rectangle()
-                .fill(Defaults[.coloredSpectrogram] ? Color(nsColor: musicManager.avgColor).gradient : Color.gray.gradient)
-                .frame(width: 50, alignment: .center)
-                .matchedGeometryEffect(id: "spectrum", in: albumArtNamespace)
-                .mask {
-                    AudioVisualizerView(isPlaying: $musicManager.isPlaying)
-                        .frame(width: 16, height: 12)
-                }
+            SpectrumVisualizer(useMusicVisualizer: useMusicVisualizer, forceSpectrum: forceSpectrum)
                 .blur(radius: (enableClosedPlayPauseOverlay && isHoveringClosedMusicWaveformControl) ? 2.4 : 0)
                 .overlay {
                     if enableClosedPlayPauseOverlay {
@@ -1678,10 +1821,10 @@ struct ContentView: View {
             return nil
         }
 
-        guard !coordinator.expandingView.show else {
+        guard !isCurrentScreenExpansionVisible else {
             ExtensionRoutingDiagnostics.shared.logSuppression(
                 .standalone,
-                reason: "expanding view \(coordinator.expandingView.type) visible",
+                reason: "expanding view \(String(describing: currentScreenExpansionType ?? coordinator.expandingView.type)) visible",
                 pendingCount: candidates.count
             )
             return nil
@@ -1801,7 +1944,7 @@ struct ContentView: View {
             && !vm.hideOnClosed
             && !lockScreenManager.isLocked
             && !isMusicHUDDeferredAfterUnlock
-            && !coordinator.expandingView.show
+            && !isCurrentScreenExpansionVisible
             && (!musicManager.isPlayerIdle || musicManager.bundleIdentifier != nil)
             && !coordinator.firstLaunch
     }
@@ -1836,6 +1979,21 @@ struct ContentView: View {
         )
 
         return activationRect.contains(location)
+    }
+
+    /// Cancels every long-lived task / event monitor this view owns. Called from
+    /// `.onDisappear` and from `vm.onViewTeardown` on window close. Idempotent.
+    private func performViewTeardown() {
+        hoverTask?.cancel()
+        stopHoverClickMonitor()
+        removeStickyTerminalClickMonitor()
+        stopHiddenEdgeHoverPolling()
+        cancelMusicControlWindowSync()
+        hideMusicControlWindow()
+        cancelMusicControlVisibilityTimer()
+        clearMusicControlVisibilityDeadline()
+        musicControlSuppressionTask?.cancel()
+        isHoveringClosedMusicWaveformControl = false
     }
 
     private func startHiddenEdgeHoverPolling() {
@@ -1908,10 +2066,19 @@ struct ContentView: View {
         }
     }
 
-    /// Installs the global outside-click monitor when Terminal + sticky mode are active (e.g. keyboard-opened terminal).
-    /// Removes the monitor when the tab, sticky setting, or open state no longer applies.
+    /// Installs the global outside-click monitor whenever the Terminal tab is open
+    /// (e.g. keyboard-opened terminal), regardless of sticky mode.
+    ///
+    /// Sticky mode only controls whether the terminal closes when the cursor leaves
+    /// the notch (see `shouldPreventAutoClose`).  An outside click should always close
+    /// the terminal — this covers the case where the terminal is opened via the
+    /// shortcut and the cursor never enters the notch, so there's no hover-out event
+    /// to trigger the normal auto-close.
+    ///
+    /// While the cursor is hovering inside the notch, hover handling owns close
+    /// behavior, so the monitor is not installed; it is re-synced on hover-out.
     private func syncStickyTerminalOutsideClickMonitor() {
-        guard vm.notchState == .open, terminalStickyMode, coordinator.currentView == .terminal else {
+        guard vm.notchState == .open, coordinator.currentView == .terminal, !isHovering else {
             removeStickyTerminalClickMonitor()
             return
         }
@@ -2630,6 +2797,8 @@ private struct MusicTimerSupplementView: View {
             Text(countdownText)
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundColor(timerManager.isOvertime ? .red : .white)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .contentTransition(.numericText())
                 .animation(.smooth(duration: 0.25), value: timerManager.remainingTime)
                 .frame(width: countdownFrameWidth, alignment: .trailing)
@@ -2638,7 +2807,7 @@ private struct MusicTimerSupplementView: View {
                 barView(width: countdownTextWidth)
             }
         }
-        .padding(.trailing, 8)
+        .padding(.trailing, 2)
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
@@ -2785,7 +2954,9 @@ private typealias MusicSupplementFont = UIFont
 
 private enum TimerSupplementMetrics {
     static func countdownTextWidth(for text: String) -> CGFloat {
-        musicMeasureText(text, font: MusicSupplementFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold))
+        // Measure with a fully monospaced font (matching the `.monospaced` design used
+        // to render) so hour-format times like 1:00:00 aren't under-measured and clipped.
+        musicMeasureText(text, font: MusicSupplementFont.monospacedSystemFont(ofSize: 13, weight: .semibold))
     }
 
     static func countdownFrameWidth(for text: String) -> CGFloat {

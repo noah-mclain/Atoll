@@ -97,6 +97,7 @@ struct ExpandedItem {
     var type: SneakContentType = .battery
     var value: CGFloat = 0
     var browser: BrowserType = .chromium
+    var autoHideDuration: TimeInterval? = nil
 }
 
 class DynamicIslandViewCoordinator: ObservableObject {
@@ -104,7 +105,7 @@ class DynamicIslandViewCoordinator: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var hoverOpenSuppressedUntil: Date = .distantPast
     
-    private static let tabOrder: [NotchViews] = [.home, .shelf, .timer, .stats, .colorPicker, .notes, .clipboard, .terminal, .extensionExperience]
+    private static let tabOrder: [NotchViews] = [.home, .shelf, .timer, .stats, .llmUsage, .colorPicker, .notes, .clipboard, .terminal, .extensionExperience]
     
     /// Direction of the most recent tab switch (true = forward/right, false = backward/left)
     @Published var tabSwitchForward: Bool = true
@@ -365,16 +366,21 @@ class DynamicIslandViewCoordinator: ObservableObject {
             return
         }
         DispatchQueue.main.async {
+            // Single write so `sneakPeek.didSet` (which schedules the auto-hide)
+            // fires once, not once per field — the per-field writes raced the hide
+            // Task and could wedge `show == true` with no pending hide.
+            var updated = self.sneakPeek
+            updated.show = status
+            updated.type = type
+            updated.value = value
+            updated.icon = icon
+            updated.title = title
+            updated.subtitle = subtitle
+            updated.accentColor = accentColor
+            updated.styleOverride = styleOverride
+            updated.targetScreenName = targetScreen?.localizedName
             withAnimation(.smooth(duration: 0.3)) {
-                self.sneakPeek.show = status
-                self.sneakPeek.type = type
-                self.sneakPeek.value = value
-                self.sneakPeek.icon = icon
-                self.sneakPeek.title = title
-                self.sneakPeek.subtitle = subtitle
-                self.sneakPeek.accentColor = accentColor
-                self.sneakPeek.styleOverride = styleOverride
-                self.sneakPeek.targetScreenName = targetScreen?.localizedName
+                self.sneakPeek = updated
             }
         }
     }
@@ -416,7 +422,8 @@ class DynamicIslandViewCoordinator: ObservableObject {
         status: Bool,
         type: SneakContentType,
         value: CGFloat = 0,
-        browser: BrowserType = .chromium
+        browser: BrowserType = .chromium,
+        autoHideDuration: TimeInterval? = nil
     ) {
         Task { @MainActor in
             withAnimation(.smooth) {
@@ -424,6 +431,7 @@ class DynamicIslandViewCoordinator: ObservableObject {
                 self.expandingView.type = type
                 self.expandingView.value = value
                 self.expandingView.browser = browser
+                self.expandingView.autoHideDuration = autoHideDuration
             }
         }
     }
@@ -436,7 +444,7 @@ class DynamicIslandViewCoordinator: ObservableObject {
                 expandingViewTask?.cancel()
                 // Only auto-hide for battery, not for downloads (DownloadManager handles that)
                 if expandingView.type != .download {
-                    let duration: TimeInterval = 3
+                    let duration = expandingView.autoHideDuration ?? 3
                     expandingViewTask = Task { [weak self] in
                         try? await Task.sleep(for: .seconds(duration))
                         guard let self = self, !Task.isCancelled else { return }

@@ -132,8 +132,13 @@ let notchShadowPaddingStandard: CGFloat = 18
 let notchShadowPaddingMinimalistic: CGFloat = 12
 
 @MainActor
-var minimalisticOpenNotchSize: CGSize {
+func minimalisticOpenNotchSize(isDynamicIslandMode: Bool) -> CGSize {
     var size = minimalisticBaseOpenNotchSize
+
+    if isDynamicIslandMode {
+        size.width = 340 // Reduced from 420 for a narrower pill
+        size.height = 144 // Exact height of the minimalistic music player view
+    }
 
     if Defaults[.enableLyrics] {
         size.height += minimalisticLyricsExtraHeight
@@ -158,6 +163,10 @@ let minimalisticCornerRadiusInsets: (opened: (top: CGFloat, bottom: CGFloat), cl
 
 /// Padding on the terminal block inside the notch. Inner corner radius = outer shell radius on that edge, minus the matching edge padding.
 let notchTerminalContentEdgePadding: (top: CGFloat, horizontal: CGFloat, bottom: CGFloat) = (4, 8, 8)
+
+/// Inner margin (all edges) between the SwiftTerm view's glyphs and the terminal block edge.
+/// Applied to the LocalProcessTerminalView frame only; the frosted blur underlay stays full-bleed.
+let notchTerminalInnerTextInset: CGFloat = 6
 
 /// Bottom radii for the shell (outer) and the terminal ``clipShape`` (inner), per design: inner = outer shell bottom radius − `notchTerminalContentEdgePadding.bottom`.
 func notchTerminalBottomCornerRadii(
@@ -301,7 +310,7 @@ func getScreenFrame(_ screen: String? = nil) -> CGRect? {
 func getClosedNotchSize(screen: String? = nil) -> CGSize {
     // Default notch size, to avoid using optionals
     var notchHeight: CGFloat = Defaults[.nonNotchHeight]
-    var notchWidth: CGFloat = 185
+    var notchWidth: CGFloat = Defaults[.closedNotchWidth]
 
     var selectedScreen = NSScreen.main
 
@@ -316,6 +325,10 @@ func getClosedNotchSize(screen: String? = nil) -> CGSize {
            let topRightNotchpadding: CGFloat = screen.auxiliaryTopRightArea?.width
         {
             notchWidth = screen.frame.width - topLeftNotchpadding - topRightNotchpadding + 4
+            
+            if Defaults[.customizePhysicalNotchWidth] {
+                notchWidth = Defaults[.closedNotchWidth]
+            }
         }
 
         // Check if the Mac has a notch

@@ -427,10 +427,30 @@ enum SneakPeekStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
     
     var id: String { self.rawValue }
     
-    var LocalizedName : String {
+    var localizedName: String {
         switch self {
         case .standard: return String(localized: "Default")
         case .inline: return String(localized: "Inline")
+        }
+    }
+}
+
+enum LogLevel: Int, CaseIterable, Identifiable, Defaults.Serializable {
+    case none = 0
+    case error = 1
+    case warning = 2
+    case info = 3
+    case debug = 4
+    
+    var id: Int { self.rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .none: return "No Logging"
+        case .error: return "Error"
+        case .warning: return "Warning"
+        case .info: return "Info"
+        case .debug: return "Debug"
         }
     }
 }
@@ -471,6 +491,22 @@ enum ProgressBarStyle: String, CaseIterable, Identifiable, Defaults.Serializable
     case segmented = "Segmented"
     
     var id: String { self.rawValue }
+}
+
+enum BatteryNotificationStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case standard
+    case compact
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard:
+            return String(localized: "Standard")
+        case .compact:
+            return String(localized: "Compact")
+        }
+    }
 }
 
 enum MusicAuxiliaryControl: String, CaseIterable, Identifiable, Defaults.Serializable {
@@ -694,23 +730,37 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
     var title: String
     var content: String
     var creationDate: Date
+    var modificationDate: Date
     var colorIndex: Int // 0: Yellow, 1: Blue, 2: Red, 3: Green
     var isPinned: Bool = false
     var imageFileName: String? = nil // Store filename instead of raw data
+    var appleNotesId: String? = nil
     
     // Internal property for migration
     private enum CodingKeys: String, CodingKey {
-        case id, title, content, creationDate, colorIndex, isPinned, imageFileName, imageData
+        case id, title, content, creationDate, modificationDate, colorIndex, isPinned, imageFileName, imageData, appleNotesId
     }
     
-    init(id: UUID = UUID(), title: String, content: String, creationDate: Date, colorIndex: Int, isPinned: Bool = false, imageFileName: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        content: String,
+        creationDate: Date,
+        modificationDate: Date? = nil,
+        colorIndex: Int,
+        isPinned: Bool = false,
+        imageFileName: String? = nil,
+        appleNotesId: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.content = content
         self.creationDate = creationDate
+        self.modificationDate = modificationDate ?? creationDate
         self.colorIndex = colorIndex
         self.isPinned = isPinned
         self.imageFileName = imageFileName
+        self.appleNotesId = appleNotesId
     }
     
     init(from decoder: Decoder) throws {
@@ -719,8 +769,10 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
         title = try container.decode(String.self, forKey: .title)
         content = try container.decode(String.self, forKey: .content)
         creationDate = try container.decode(Date.self, forKey: .creationDate)
+        modificationDate = try container.decodeIfPresent(Date.self, forKey: .modificationDate) ?? creationDate
         colorIndex = try container.decode(Int.self, forKey: .colorIndex)
         isPinned = try container.decode(Bool.self, forKey: .isPinned)
+        appleNotesId = try container.decodeIfPresent(String.self, forKey: .appleNotesId)
         
         // Migration logic: if imageData exists but imageFileName doesn't, save it to disk
         if let data = try container.decodeIfPresent(Data.self, forKey: .imageData) {
@@ -739,9 +791,11 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
         try container.encode(title, forKey: .title)
         try container.encode(content, forKey: .content)
         try container.encode(creationDate, forKey: .creationDate)
+        try container.encode(modificationDate, forKey: .modificationDate)
         try container.encode(colorIndex, forKey: .colorIndex)
         try container.encode(isPinned, forKey: .isPinned)
         try container.encode(imageFileName, forKey: .imageFileName)
+        try container.encodeIfPresent(appleNotesId, forKey: .appleNotesId)
     }
     
     static let colors: [Color] = [.yellow, .blue, .red, .green, .purple, .orange]
@@ -769,12 +823,18 @@ struct NoteItem: Codable, Identifiable, Defaults.Serializable, Hashable {
     }
 }
 
+enum ColorExtractionMode: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case legacy, vibrant
+    var id: Self { self }
+}
+
 extension Defaults.Keys {
         // MARK: General
+    static let logLevel = Key<LogLevel>("logLevel", default: .none)
     static let menubarIcon = Key<Bool>("menubarIcon", default: true)
     static let showOnAllDisplays = Key<Bool>("showOnAllDisplays", default: false)
     static let automaticallySwitchDisplay = Key<Bool>("automaticallySwitchDisplay", default: true)
-    static let releaseName = Key<String>("releaseName", default: "Seychelles")
+    static let releaseName = Key<String>("releaseName", default: "Fiji")
     static let hideDynamicIslandFromScreenCapture = Key<Bool>("hideDynamicIslandFromScreenCapture", default: false)
     
         // MARK: Behavior
@@ -798,6 +858,8 @@ extension Defaults.Keys {
     static let nonNotchHeight = Key<CGFloat>("nonNotchHeight", default: 32)
     static let notchHeight = Key<CGFloat>("notchHeight", default: 32)
     static let openNotchWidth = Key<CGFloat>("openNotchWidth", default: 640)
+    static let closedNotchWidth = Key<CGFloat>("closedNotchWidth", default: 150)
+    static let customizePhysicalNotchWidth = Key<Bool>("customizePhysicalNotchWidth", default: false)
         //static let openLastTabByDefault = Key<Bool>("openLastTabByDefault", default: false)
     
         // MARK: Appearance
@@ -827,6 +889,9 @@ extension Defaults.Keys {
     )
     static let playerColorTinting = Key<Bool>("playerColorTinting", default: true)
     static let useMusicVisualizer = Key<Bool>("useMusicVisualizer", default: true)
+    static let visualizerBarCount = Key<Int>("visualizerBarCount", default: 4)
+    static let enableWaveformScrubber = Key<Bool>("enableWaveformScrubber", default: true)
+    static let colorExtractionMode = Key<ColorExtractionMode>("colorExtractionMode", default: .vibrant)
     static let customVisualizers = Key<[CustomVisualizer]>("customVisualizers", default: [])
     static let selectedVisualizer = Key<CustomVisualizer?>("selectedVisualizer", default: nil)
     static let customAppIcons = Key<[CustomAppIcon]>("customAppIcons", default: [])
@@ -911,6 +976,10 @@ extension Defaults.Keys {
     )
     static let lockScreenPanelUsesBlur = Key<Bool>("lockScreenPanelUsesBlur", default: true)
     static let lockScreenMusicMergedAirPlayOutput = Key<Bool>("lockScreenMusicMergedAirPlayOutput", default: true)
+    static let lockScreenMusicFullscreenArtworkEnabled = Key<Bool>("lockScreenMusicFullscreenArtworkEnabled", default: true)
+    static let lockScreenKeepAlbumArtVisibleDuringFullscreenArtwork = Key<Bool>("lockScreenKeepAlbumArtVisibleDuringFullscreenArtwork", default: false)
+    static let lockScreenMusicFullscreenVideoArtwork = Key<Bool>("lockScreenMusicFullscreenVideoArtwork", default: true)
+    static let lockScreenUseArtworkLayoutOverFullscreenCanvas = Key<Bool>("lockScreenShowCenteredAlbumArtOverFullscreenCanvas", default: true)
     static let lockScreenTimerWidgetUsesBlur = Key<Bool>("lockScreenTimerWidgetUsesBlur", default: false)
     static let lockScreenReminderChipStyle = Key<LockScreenReminderChipStyle>("lockScreenReminderChipStyle", default: .eventColor)
     static let lockScreenReminderWidgetHorizontalAlignment = Key<String>("lockScreenReminderWidgetHorizontalAlignment", default: "center")
@@ -936,9 +1005,21 @@ extension Defaults.Keys {
     static let showPowerStatusNotifications = Key<Bool>("showPowerStatusNotifications", default: true)
     static let showBatteryIndicator = Key<Bool>("showBatteryIndicator", default: BatteryActivityManager.shared.hasBattery())
     static let showBatteryPercentage = Key<Bool>("showBatteryPercentage", default: true)
+    static let showBatteryPercentInside = Key<Bool>("showBatteryPercentInside", default: true)
+    static let showMinimalisticBatteryIndicator = Key<Bool>("showMinimalisticBatteryIndicator", default: true)
     static let showPowerStatusIcons = Key<Bool>("showPowerStatusIcons", default: true)
     static let playLowBatteryAlertSound = Key<Bool>("playLowBatteryAlertSound", default: true)
-    
+    static let showChargingBatteryHUD = Key<Bool>("showChargingBatteryHUD", default: true)
+    static let showLowBatteryHUD = Key<Bool>("showLowBatteryHUD", default: true)
+    static let showFullBatteryHUD = Key<Bool>("showFullBatteryHUD", default: true)
+    static let chargingBatteryHUDDuration = Key<Int>("chargingBatteryHUDDuration", default: 3)
+    static let lowBatteryHUDDuration = Key<Int>("lowBatteryHUDDuration", default: 3)
+    static let fullBatteryHUDDuration = Key<Int>("fullBatteryHUDDuration", default: 3)
+    static let lowBatteryHUDThreshold = Key<Int>("lowBatteryHUDThreshold", default: 20)
+    static let fullBatteryHUDThreshold = Key<Int>("fullBatteryHUDThreshold", default: 100)
+    static let lowBatteryHUDStyle = Key<BatteryNotificationStyle>("lowBatteryHUDStyle", default: .standard)
+    static let fullBatteryHUDStyle = Key<BatteryNotificationStyle>("fullBatteryHUDStyle", default: .standard)
+
     static let lockScreenBatteryShowsBatteryGauge = Key<Bool>(
         "lockScreenWeatherShowsBatteryGauge",
         default: BatteryActivityManager.shared.hasBattery()
@@ -992,6 +1073,10 @@ extension Defaults.Keys {
     
     // MARK: Media Controller
     static let mediaController = Key<MediaControllerType>("mediaController", default: defaultMediaController)
+    static let spotifySPDCCookie = Key<String>("spotifySPDCCookie", default: "")
+    static let spotifyAuthAccessToken = Key<String>("spotifyAuthAccessToken", default: "")
+    static let spotifyAuthAccessTokenExpiration = Key<Double>("spotifyAuthAccessTokenExpiration", default: 0)
+    static let spotifyAuthLastValidatedAt = Key<Double>("spotifyAuthLastValidatedAt", default: 0)
     
     // MARK: Bluetooth Audio Devices
     static let showBluetoothDeviceConnections = Key<Bool>("showBluetoothDeviceConnections", default: true)
@@ -1002,9 +1087,14 @@ extension Defaults.Keys {
     static let showBluetoothBatteryPercentageText = Key<Bool>("showBluetoothBatteryPercentageText", default: false)
     static let showBluetoothDeviceNameMarquee = Key<Bool>("showBluetoothDeviceNameMarquee", default: false)
     static let useBluetoothHUD3DIcon = Key<Bool>("useBluetoothHUD3DIcon", default: true)
+    static let showAirPodsListeningModeChanges = Key<Bool>("showAirPodsListeningModeChanges", default: true)
     
     // MARK: Stats Feature
     static let enableStatsFeature = Key<Bool>("enableStatsFeature", default: false)
+    static let enableLLMUsageFeature = Key<Bool>("enableLLMUsageFeature", default: false)
+    static let enableClaudeProvider = Key<Bool>("enableClaudeProvider", default: true)
+    static let enableCodexProvider = Key<Bool>("enableCodexProvider", default: true)
+    static let enableCursorProvider = Key<Bool>("enableCursorProvider", default: true)
     static let autoStartStatsMonitoring = Key<Bool>("autoStartStatsMonitoring", default: true)
     static let statsStopWhenNotchCloses = Key<Bool>("statsStopWhenNotchCloses", default: true)
     static let statsUpdateInterval = Key<Double>("statsUpdateInterval", default: 1.0)
@@ -1044,6 +1134,8 @@ extension Defaults.Keys {
     static let timerShowsProgress = Key<Bool>("timerShowsProgress", default: true)
     static let timerProgressStyle = Key<TimerProgressStyle>("timerProgressStyle", default: .bar)
     static let mirrorSystemTimer = Key<Bool>("mirrorSystemTimer", default: true)
+    static let timerInputStyle = Key<TimerInputStyle>("timerInputStyle", default: .manual)
+    
     
     // MARK: Reminder Live Activity
     static let enableReminderLiveActivity = Key<Bool>("enableReminderLiveActivity", default: true)
@@ -1103,6 +1195,12 @@ extension Defaults.Keys {
     static let enableKeyboardBacklightHUD = Key<Bool>("enableKeyboardBacklightHUD", default: true)
     static let systemHUDSensitivity = Key<Int>("systemHUDSensitivity", default: 5)
     static let playVolumeChangeFeedback = Key<Bool>("playVolumeChangeFeedback", default: false)
+
+    // Step sizes for hardware media keys (percent of full range, 1-25)
+    static let volumeStepPercent = Key<Int>("volumeStepPercent", default: 6)
+    static let volumeFineStepPercent = Key<Int>("volumeFineStepPercent", default: 2)
+    static let brightnessStepPercent = Key<Int>("brightnessStepPercent", default: 6)
+    static let brightnessFineStepPercent = Key<Int>("brightnessFineStepPercent", default: 2)
     
     // MARK: Custom OSD Window Feature
     static let enableCustomOSD = Key<Bool>("enableCustomOSD", default: false)
@@ -1194,6 +1292,7 @@ extension Defaults.Keys {
     
     // MARK: Lyrics Feature
     static let enableLyrics = Key<Bool>("enableLyrics", default: false)
+    static let showLiveCanvasInDynamicIsland = Key<Bool>("showLiveCanvasInDynamicIsland", default: false)
     
     // MARK: Notes Feature
     static let enableNotes = Key<Bool>("enableNotes", default: false)
@@ -1203,6 +1302,8 @@ extension Defaults.Keys {
     static let enableCreateFromClipboard = Key<Bool>("enableCreateFromClipboard", default: true)
     static let enableNoteCharCount = Key<Bool>("enableNoteCharCount", default: true)
     static let savedNotes = Key<[NoteItem]>("savedNotes", default: [])
+    static let enableAppleNotesSync = Key<Bool>("enableAppleNotesSync", default: false)
+    static let appleNotesLastSyncDate = Key<Date?>("appleNotesLastSyncDate", default: nil)
     
     // Helper to determine the default media controller based on macOS version
     static var defaultMediaController: MediaControllerType {
@@ -1295,4 +1396,5 @@ extension Defaults.Keys {
         let fallback = MusicAuxiliaryControl.alternative(excluding: current)
         Defaults[.musicAuxRightControl] = fallback
     }
+    static let showSongMetadataInClosedNotch = Key<Bool>("showSongMetadataInClosedNotch", default: false)
 }

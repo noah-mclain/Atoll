@@ -23,6 +23,129 @@
 import Combine
 import Defaults
 import SwiftUI
+import AppKit
+import AVFoundation
+
+private final class DynamicIslandArtworkLoopController {
+    let player: AVQueuePlayer
+    private var looper: AVPlayerLooper?
+    private var playbackStateCancellable: AnyCancellable?
+
+    init(url: URL) {
+        let item = AVPlayerItem(url: url)
+        player = AVQueuePlayer()
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+        looper = AVPlayerLooper(player: player, templateItem: item)
+
+        if MusicManager.shared.isPlaying {
+            player.play()
+        }
+
+        playbackStateCancellable = MusicManager.shared.$isPlaying
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isPlaying in
+                guard let self else { return }
+                if isPlaying {
+                    self.player.play()
+                } else {
+                    self.player.pause()
+                }
+            }
+    }
+
+    deinit {
+        player.pause()
+        looper = nil
+        playbackStateCancellable = nil
+    }
+}
+
+private final class DynamicIslandArtworkVideoContainerView: NSView {
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.backgroundColor = NSColor.clear.cgColor
+        layer?.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        playerLayer.frame = bounds
+    }
+}
+
+private struct DynamicIslandArtworkVideoView: NSViewRepresentable {
+    let url: URL
+    let videoGravity: AVLayerVideoGravity
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> DynamicIslandArtworkVideoContainerView {
+        let view = DynamicIslandArtworkVideoContainerView(frame: .zero)
+        context.coordinator.attach(layer: view.playerLayer, url: url, gravity: videoGravity)
+        return view
+    }
+
+    func updateNSView(_ nsView: DynamicIslandArtworkVideoContainerView, context: Context) {
+        context.coordinator.attach(layer: nsView.playerLayer, url: url, gravity: videoGravity)
+    }
+
+    final class Coordinator {
+        private var controller: DynamicIslandArtworkLoopController?
+        private var currentURL: URL?
+
+        func attach(layer: AVPlayerLayer, url: URL, gravity: AVLayerVideoGravity) {
+            layer.videoGravity = gravity
+
+            if currentURL != url || controller == nil {
+                currentURL = url
+                controller = DynamicIslandArtworkLoopController(url: url)
+            }
+
+            if layer.player !== controller?.player {
+                layer.player = controller?.player
+            }
+        }
+    }
+}
+
+struct DynamicIslandArtworkSourceView: View {
+    @ObservedObject private var musicManager = MusicManager.shared
+    @Default(.showLiveCanvasInDynamicIsland) private var showLiveCanvasInDynamicIsland
+
+    let cornerRadius: CGFloat
+    let contentMode: ContentMode
+
+    private var liveCanvasURL: URL? {
+        guard showLiveCanvasInDynamicIsland else { return nil }
+        return musicManager.videoArtworkURL
+    }
+
+    var body: some View {
+        Group {
+            if let liveCanvasURL {
+                DynamicIslandArtworkVideoView(url: liveCanvasURL, videoGravity: .resizeAspectFill)
+            } else {
+                Image(nsImage: musicManager.albumArt)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+}
 
 // MARK: - Music Player Components
 
@@ -43,7 +166,22 @@ struct MusicPlayerView: View {
 struct AlbumArtView: View {
     @ObservedObject var musicManager = MusicManager.shared
     @ObservedObject var vm: DynamicIslandViewModel
+    @Default(.showLiveCanvasInDynamicIsland) private var showLiveCanvasInDynamicIsland
     let albumArtNamespace: Namespace.ID
+
+    private var usesLiveCanvasArtwork: Bool {
+        showLiveCanvasInDynamicIsland && musicManager.videoArtworkURL != nil
+    }
+
+    private var albumArtCornerRadius: CGFloat {
+        Defaults[.cornerRadiusScaling]
+            ? musicManager.albumArt.size.width / musicManager.albumArt.size.height > 1.0
+                ? MusicPlayerImageSizes.cornerRadiusInset.opened / 3
+                : MusicPlayerImageSizes.cornerRadiusInset.opened
+            : musicManager.albumArt.size.width / musicManager.albumArt.size.height > 1.0
+                ? MusicPlayerImageSizes.cornerRadiusInset.closed / 3
+                : MusicPlayerImageSizes.cornerRadiusInset.closed
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -61,24 +199,26 @@ struct AlbumArtView: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .background(
-                Image(nsImage: musicManager.albumArt)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: Defaults[.cornerRadiusScaling]
-                                ? musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? MusicPlayerImageSizes.cornerRadiusInset.opened/3 : MusicPlayerImageSizes.cornerRadiusInset.opened
-                                : musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? MusicPlayerImageSizes.cornerRadiusInset.closed/3 : MusicPlayerImageSizes.cornerRadiusInset.closed
-
-
-                        )
-                    )
+                DynamicIslandArtworkSourceView(
+                    cornerRadius: albumArtCornerRadius,
+                    contentMode: .fill
+                )
             )
             .clipped()
             .scaleEffect(x: 1.3, y: 1.4)
             .rotationEffect(.degrees(92))
             .blur(radius: 40)
-            .opacity(musicManager.isPlaying ? 0.5 : 0)
+            .opacity(
+                usesLiveCanvasArtwork
+                    ? (musicManager.isPlaying ? 0.62 : 0.18)
+                    : (musicManager.isPlaying ? 0.5 : 0)
+            )
+            .shadow(
+                color: Color(nsColor: musicManager.avgColor).opacity(usesLiveCanvasArtwork ? 0.24 : 0.16),
+                radius: usesLiveCanvasArtwork ? 22 : 14,
+                x: 0,
+                y: 0
+            )
     }
 
     private var albumArtButton: some View {
@@ -115,18 +255,10 @@ struct AlbumArtView: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                Image(nsImage: musicManager.albumArt)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: Defaults[.cornerRadiusScaling]
-                                ? musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? MusicPlayerImageSizes.cornerRadiusInset.opened/3 : MusicPlayerImageSizes.cornerRadiusInset.opened
-                                : musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? MusicPlayerImageSizes.cornerRadiusInset.closed/3 : MusicPlayerImageSizes.cornerRadiusInset.closed
-
-
-                        )
-                    ) // ensures that even the rectagular album cover is rounded just like the MacOS media player
+                DynamicIslandArtworkSourceView(
+                    cornerRadius: albumArtCornerRadius,
+                    contentMode: .fit
+                )
             }
             .matchedGeometryEffect(id: "albumArt", in: albumArtNamespace)
         .clipped()
@@ -181,7 +313,9 @@ struct MusicControlsView: View {
         GeometryReader { geo in
             VStack(alignment: .leading, spacing: 4) {
                 songInfo(width: geo.size.width)
+                    .zIndex(1) // Ensure it draws above the waveform scrubber
                 musicSlider
+                    .zIndex(0)
             }
         }
         .padding(.top, 10)
@@ -247,7 +381,7 @@ struct MusicControlsView: View {
     }
 
     private var musicSlider: some View {
-        TimelineView(.animation(minimumInterval: 1.0, paused: isProgressTimelinePaused)) { timeline in
+        TimelineView(.animation(paused: isProgressTimelinePaused)) { timeline in
             MusicSliderView(
                 sliderValue: $sliderValue,
                 duration: $musicManager.songDuration,
@@ -649,8 +783,8 @@ struct MusicSliderView: View {
     var onValueChange: (Double) -> Void
     var labelLayout: TimeLabelLayout = .stacked
     var trailingLabel: TrailingLabel = .duration
-    var restingTrackHeight: CGFloat = 5
-    var draggingTrackHeight: CGFloat = 9
+    var restingTrackHeight: CGFloat = 8
+    var draggingTrackHeight: CGFloat = 14
 
     enum TimeLabelLayout {
         case stacked
@@ -675,10 +809,15 @@ struct MusicSliderView: View {
                 }
             }
         }
+        .onAppear {
+            guard !isLiveStream else { return }
+            guard !dragging else { return }
+            setSliderValueWithoutAnimation(MusicManager.shared.estimatedPlaybackPosition())
+        }
         .onChange(of: currentDate) { newDate in
             guard !isLiveStream else { return }
             guard !dragging, timestampDate.timeIntervalSince(lastDragged) > -1 else { return }
-            sliderValue = MusicManager.shared.estimatedPlaybackPosition(at: newDate)
+            setSliderValueWithoutAnimation(MusicManager.shared.estimatedPlaybackPosition(at: newDate))
         }
         .onChange(of: isPlaying) { _, playing in
             // Snap slider to the exact position when music pauses so
@@ -694,6 +833,14 @@ struct MusicSliderView: View {
         }
     }
 
+    private func setSliderValueWithoutAnimation(_ value: Double) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            sliderValue = value
+        }
+    }
+
     private var stackedContent: some View {
         VStack(spacing: 6) {
             sliderCore
@@ -706,16 +853,16 @@ struct MusicSliderView: View {
             }
             .fontWeight(.medium)
             .foregroundColor(timeLabelColor)
-            .font(.caption)
+            .font(.system(size: 11, weight: .medium, design: .default).monospacedDigit())
         }
     }
 
     private var inlineContent: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             Text(timeString(from: sliderValue))
                 .font(inlineLabelFont)
                 .foregroundColor(timeLabelColor)
-                .frame(width: 42, alignment: .leading)
+                .frame(width: 36, alignment: .leading)
 
             sliderCore
                 .frame(height: sliderFrameHeight)
@@ -724,7 +871,7 @@ struct MusicSliderView: View {
             Text(trailingTimeText)
                 .font(inlineLabelFont)
                 .foregroundColor(timeLabelColor)
-                .frame(width: 48, alignment: .trailing)
+                .frame(width: 42, alignment: .trailing)
         }
     }
 
@@ -737,15 +884,15 @@ struct MusicSliderView: View {
                 .frame(height: sliderFrameHeight)
                 
         case .inline:
-            HStack(spacing: 10) {
+            HStack(spacing: 6) {
                 Spacer()
-                    .frame(width: 42)
+                    .frame(width: 36)
                 LiveStreamProgressIndicator(tint: sliderTint)
                     .frame(maxWidth: .infinity)
                     .frame(height: sliderFrameHeight)
 
                 Spacer()
-                    .frame(width: 48)
+                    .frame(width: 42)
             }
         }
     }
@@ -760,15 +907,6 @@ struct MusicSliderView: View {
             onValueChange: onValueChange,
             restingTrackHeight: restingTrackHeight,
             draggingTrackHeight: draggingTrackHeight
-        )
-        // Smoothly interpolate the filled track between 1-second ticks using
-        // Core Animation — runs on the GPU with zero CPU polling cost.
-        // Disabled while dragging or paused so the bar responds instantly.
-        .animation(
-            !dragging && isPlaying && !isLiveStream
-                ? .linear(duration: 1.0)
-                : nil,
-            value: sliderValue
         )
     }
 
@@ -800,7 +938,7 @@ struct MusicSliderView: View {
     }
 
     private var inlineLabelFont: Font {
-        .system(size: 11, weight: .medium, design: .monospaced)
+        .system(size: 11, weight: .medium, design: .default).monospacedDigit()
     }
 
     private var sliderFrameHeight: CGFloat {
@@ -831,8 +969,12 @@ struct CustomSlider: View {
     @Binding var lastDragged: Date
     var onValueChange: ((Double) -> Void)?
     var thumbSize: CGFloat = 12
-    var restingTrackHeight: CGFloat = 5
-    var draggingTrackHeight: CGFloat = 9
+    var restingTrackHeight: CGFloat = 8
+    var draggingTrackHeight: CGFloat = 14
+    
+    @State private var isHovering: Bool = false
+    @Default(.enableRealTimeWaveform) var enableRealTimeWaveform
+    @Default(.enableWaveformScrubber) var enableWaveformScrubber
 
     var body: some View {
         GeometryReader { geometry in
@@ -842,20 +984,36 @@ struct CustomSlider: View {
 
             let progress = rangeSpan == .zero ? 0 : (value - range.lowerBound) / rangeSpan
             let filledTrackWidth = min(max(progress, 0), 1) * width
+            
+            let showScrubber = isHovering && enableRealTimeWaveform && enableWaveformScrubber
 
-            ZStack(alignment: .leading) {
+            ZStack(alignment: .bottomLeading) {
                 // Background track
-                Rectangle()
-                    .fill(.gray.opacity(0.3))
-                    .frame(height: trackHeight)
+                if showScrubber {
+                    RealTimeWaveformScrubberView(
+                        color: color,
+                        secondaryColor: Defaults[.coloredSpectrogram] ? Color(nsColor: MusicManager.shared.secondaryColor) : nil,
+                        progress: progress,
+                        minHeight: trackHeight
+                    )
+                    .frame(height: trackHeight * 3.5)
+                    .offset(y: trackHeight * 0.2)
+                } else {
+                    Rectangle()
+                        .fill(.gray.opacity(0.3))
+                        .frame(height: trackHeight)
+                        .cornerRadius(trackHeight / 2)
+                }
 
                 // Filled track
-                Rectangle()
-                    .fill(color)
-                    .frame(width: filledTrackWidth, height: trackHeight)
+                if !showScrubber {
+                    Rectangle()
+                        .fill(color)
+                        .frame(width: filledTrackWidth, height: trackHeight)
+                        .cornerRadius(trackHeight / 2)
+                }
             }
-            .cornerRadius(trackHeight / 2)
-            .frame(height: max(restingTrackHeight, draggingTrackHeight))
+            .frame(height: max(restingTrackHeight, draggingTrackHeight), alignment: .bottom)
             .contentShape(Rectangle())
             .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
@@ -873,6 +1031,11 @@ struct CustomSlider: View {
                     }
             )
             .animation(.bouncy.speed(1.4), value: dragging)
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isHovering = hovering
+                }
+            }
         }
     }
 }

@@ -32,6 +32,7 @@ struct MinimalisticMusicPlayerView: View {
     @Default(.musicControlSlots) private var slotConfig
     @Default(.showMediaOutputControl) private var showMediaOutputControl
     @Default(.musicSkipBehavior) private var musicSkipBehavior
+    @Default(.showMinimalisticBatteryIndicator) private var showMinimalisticBatteryIndicator
     @ObservedObject private var reminderManager = ReminderLiveActivityManager.shared
     @ObservedObject private var timerManager = TimerManager.shared
     @ObservedObject private var coordinator = DynamicIslandViewCoordinator.shared
@@ -65,54 +66,71 @@ struct MinimalisticMusicPlayerView: View {
 
                 reminderList
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, shouldUseDynamicIslandMode(for: vm.screen) ? -4 : 12)
+            .padding(.vertical, shouldUseDynamicIslandMode(for: vm.screen) ? 14 : 0)
             .frame(maxWidth: .infinity)
             .frame(height: calculateDynamicHeight())
             .animation(.smooth(duration: 0.3), value: dynamicHeightSignature)
         } else {
             VStack(spacing: 0) {
-                // Header area with album art (matching DynamicIslandHeader height of 24pt)
-                GeometryReader { headerGeo in
-                    let albumArtWidth: CGFloat = 50
-                    let spacing: CGFloat = 10
-                    let visualizerWidth: CGFloat = useMusicVisualizer ? 24 : 0
-                    let textWidth = max(0, headerGeo.size.width - albumArtWidth - spacing - (useMusicVisualizer ? (visualizerWidth + spacing) : 0))
-                    HStack(alignment: .center, spacing: spacing) {
-                        MinimalisticAlbumArtView(vm: vm, albumArtNamespace: albumArtNamespace)
-                            .frame(width: albumArtWidth, height: albumArtWidth)
+                if showMinimalisticBatteryIndicator || shouldUseDynamicIslandMode(for: vm.screen) {
+                    // ── Battery ON / DI mode: original flat layout (unchanged) ──
+                    GeometryReader { headerGeo in
+                        let albumArtWidth: CGFloat = 50
+                        let spacing: CGFloat = 10
+                        // The right-side time label in the progress bar below is 42pt wide,
+                        // trailing-aligned, so its center sits 21pt from the right edge.
+                        // We use the same 42pt block for the visualizer so the candles
+                        // are perfectly centred above the "-00:00" text.
+                        let vizBlockWidth: CGFloat = useMusicVisualizer ? 42 : 0
+                        let visualizerBarWidth: CGFloat = useMusicVisualizer ? 24 : 0
+                        // Leave an extra 8pt gap between the title text and the visualizer.
+                        let textWidth = max(0, headerGeo.size.width - albumArtWidth - spacing - (useMusicVisualizer ? (vizBlockWidth + spacing) : 0))
+                        HStack(alignment: .center, spacing: spacing) {
+                            MinimalisticAlbumArtView(vm: vm, albumArtNamespace: albumArtNamespace)
+                                .frame(width: albumArtWidth, height: albumArtWidth)
 
-                        VStack(alignment: .leading, spacing: 1) {
-                            if !musicManager.songTitle.isEmpty {
-                                MusicTitleMarqueeView(
-                                    text: musicManager.songTitle,
-                                    isExplicit: musicManager.isCurrentTrackExplicit,
-                                    font: .system(size: 12, weight: .semibold),
-                                    nsFont: .subheadline,
-                                    textColor: .white,
-                                    frameWidth: textWidth,
-                                    badgeHeight: 13
-                                )
+                            VStack(alignment: .leading, spacing: 1) {
+                                if !musicManager.songTitle.isEmpty {
+                                    MusicTitleMarqueeView(
+                                        text: musicManager.songTitle,
+                                        isExplicit: musicManager.isCurrentTrackExplicit,
+                                        font: .system(size: 12, weight: .semibold),
+                                        nsFont: .subheadline,
+                                        textColor: .white,
+                                        frameWidth: textWidth,
+                                        badgeHeight: 13
+                                    )
+                                }
+
+                                Text(musicManager.artistName)
+                                    .font(.system(size: 10, weight: .regular))
+                                    .foregroundColor(Defaults[.playerColorTinting] ? Color(nsColor: musicManager.avgColor).ensureMinimumBrightness(factor: 0.6) : .gray)
+                                    .lineLimit(1)
+
                             }
+                            .frame(width: textWidth, alignment: .leading)
 
-                            Text(musicManager.artistName)
-                                .font(.system(size: 10, weight: .regular))
-                                .foregroundColor(Defaults[.playerColorTinting] ? Color(nsColor: musicManager.avgColor).ensureMinimumBrightness(factor: 0.6) : .gray)
-                                .lineLimit(1)
-
-                        }
-                        .frame(width: textWidth, alignment: .leading)
-
-                        if useMusicVisualizer {
-                            visualizer
-                                .frame(width: visualizerWidth)
+                            if useMusicVisualizer {
+                                // 48-pt block matches the trailing time-label width so the
+                                // candle centre lines up with the centre of "-00:00".
+                                ZStack {
+                                    visualizer
+                                        .frame(width: visualizerBarWidth)
+                                }
+                                .frame(width: vizBlockWidth)
+                            }
                         }
                     }
+                    .frame(height: 50)
+                } else {
+                    // ── Battery OFF (notch mode): U-shaped notch-hugging layout ──
+                    notchHuggingHeader
                 }
-                .frame(height: 50)
-                
+
                 // Compact progress bar
                 progressBar
-                    .padding(.top, 6)
+                    .padding(.top, batteryOffNotchMode ? 4 : 6)
                 
                 // Compact playback controls
                 if shouldShowControlHUDRow {
@@ -132,9 +150,9 @@ struct MinimalisticMusicPlayerView: View {
 
                 reminderList
             }
-            .padding(.horizontal, 12)
-            .padding(.top, -15)
-            .padding(.bottom, ReminderLiveActivityManager.baselineMinimalisticBottomPadding)
+            .padding(.horizontal, shouldUseDynamicIslandMode(for: vm.screen) ? -4 : 12)
+            .padding(.top, shouldUseDynamicIslandMode(for: vm.screen) ? 14 : (batteryOffNotchMode ? 10 : 6))
+            .padding(.bottom, shouldUseDynamicIslandMode(for: vm.screen) ? 14 : (batteryOffNotchMode ? 10 : ReminderLiveActivityManager.baselineMinimalisticBottomPadding))
             .frame(maxWidth: .infinity)
             .frame(height: calculateDynamicHeight(), alignment: .top)
             .animation(.smooth(duration: 0.3), value: dynamicHeightSignature)
@@ -244,39 +262,129 @@ struct MinimalisticMusicPlayerView: View {
         var signature = reminderEntries.count * 10
         if enableLyrics { signature += 1 }
         if shouldShowTimerCountdown { signature += 100 }
+        if showMinimalisticBatteryIndicator { signature += 1000 }
         return signature
     }
 
+    /// True when the battery indicator is hidden and we are in notch mode (not DI).
+    private var batteryOffNotchMode: Bool {
+        !showMinimalisticBatteryIndicator && !shouldUseDynamicIslandMode(for: vm.screen)
+    }
+
     private func calculateDynamicHeight() -> CGFloat {
-        var height: CGFloat = 50 // Base height for header
+        let isDynamicIsland = shouldUseDynamicIslandMode(for: vm.screen)
 
-        // Add progress bar height
-        height += 6 + 4 // progress bar + top padding
+        if !batteryOffNotchMode {
+            // ── Battery ON / DI: use the exact original height formula ──
+            var height: CGFloat = 50 // header
+            height += 6 + 4          // progress bar top padding + bar
+            height += 54 + 2         // controls + top padding
 
-        // Add playback controls height
-        height += 40 + 2 // controls + top padding
+            if enableLyrics {
+                height += 10 + 34 // lyrics padding + estimated height
+            }
+            if shouldShowTimerCountdown {
+                height += minimalisticTimerCountdownBlockHeight
+            }
+            if shouldShowReminderList {
+                height += reminderListHeight
+            }
 
-        // Add lyrics height if enabled in settings (reserve space even while loading)
-        if enableLyrics {
-            let lyricsTopPadding: CGFloat = 10
-            let lyricsEstimatedHeight: CGFloat = 34
-            height += lyricsTopPadding + lyricsEstimatedHeight
+            height += isDynamicIsland ? 14 : 15 // top padding
+            height += isDynamicIsland ? 14 : ReminderLiveActivityManager.baselineMinimalisticBottomPadding
+            return height
         }
 
+        // ── Battery OFF (notch mode): tighter height for U-shaped layout ──
+        // The album art is pulled UP into the notch header area, so the
+        // visible header in-flow is only the title + artist text (~26pt).
+        var height: CGFloat = 26 // reduced header (text only; art overlaps upward)
+        height += 4 + 4          // progress bar top padding + bar
+        height += 54 + 2         // controls + top padding
+
+        if enableLyrics {
+            height += 10 + 34
+        }
         if shouldShowTimerCountdown {
             height += minimalisticTimerCountdownBlockHeight
         }
-
-        // Add reminder list height if showing
         if shouldShowReminderList {
             height += reminderListHeight
         }
 
-        // Add padding
-        height += 15 // top padding
-        height += ReminderLiveActivityManager.baselineMinimalisticBottomPadding
-
+        height += 10 // top padding
+        height += 10 // bottom padding
         return height
+    }
+
+    // MARK: - U-Shaped Notch-Hugging Header
+
+    /// Layout that wraps content around the physical notch cutout.
+    /// Album art sits to the left of the notch, the visualizer to the right,
+    /// and the song title + artist are centered below the notch — producing a
+    /// "U" shape.
+    private var notchHuggingHeader: some View {
+        GeometryReader { geo in
+            let totalWidth = geo.size.width
+            let albumArtSize: CGFloat = 50
+            let visualizerWidth: CGFloat = useMusicVisualizer ? 24 : 0
+            // How far to pull the album art and waveform up alongside the notch.
+            let notchHeight = vm.effectiveClosedNotchHeight
+            let pullUp = max(notchHeight - 4, 20)
+            
+            ZStack(alignment: .top) {
+                // ── Left: Album art ──
+                HStack {
+                    MinimalisticAlbumArtView(vm: vm, albumArtNamespace: albumArtNamespace)
+                        .frame(width: albumArtSize, height: albumArtSize)
+                    Spacer()
+                }
+                .offset(y: -pullUp)
+                .frame(width: totalWidth)
+
+                // ── Right: Waveform ──
+                if useMusicVisualizer {
+                    HStack {
+                        Spacer()
+                        visualizer
+                            .frame(width: visualizerWidth)
+                        Spacer()
+                            .frame(width: 12)
+                    }
+                    .offset(y: -pullUp + (albumArtSize - 16) / 2)
+                    .frame(width: totalWidth)
+                }
+
+                // ── Center: Title + Artist (below the notch) ──
+                VStack(alignment: .leading, spacing: 1) {
+                    if !musicManager.songTitle.isEmpty {
+                        // In the U-shaped layout the visualizer sits in a 48-pt wide zone
+                        // (matching the time text) and has a 12-pt right spacer inside it.
+                        let textAreaWidth = max(0, totalWidth - albumArtSize - 10 - (useMusicVisualizer ? (visualizerWidth + 12 + 10) : 0))
+                        MusicTitleMarqueeView(
+                            text: musicManager.songTitle,
+                            isExplicit: musicManager.isCurrentTrackExplicit,
+                            font: .system(size: 12, weight: .semibold),
+                            nsFont: .subheadline,
+                            textColor: .white,
+                            frameWidth: textAreaWidth,
+                            badgeHeight: 13
+                        )
+                    }
+
+                    Text(musicManager.artistName)
+                        .font(.system(size: 10, weight: .regular))
+                        .foregroundColor(Defaults[.playerColorTinting] ? Color(nsColor: musicManager.avgColor).ensureMinimumBrightness(factor: 0.6) : .gray)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, albumArtSize + 10)
+                // Position so the bottom of the artist text aligns with the
+                // bottom of the album art (which was pulled up by pullUp).
+                .offset(y: albumArtSize - pullUp - 28)
+            }
+        }
+        .frame(height: 26) // Only the text portion is in-flow; album art overlaps upward
     }
 
     private var timerCountdownSection: some View {
@@ -639,13 +747,14 @@ private struct MinimalisticReminderDetailsView: View {
     @Default(.useMusicVisualizer) var useMusicVisualizer
     
     private var visualizer: some View {
-        Rectangle()
-            .fill(Defaults[.coloredSpectrogram] ? Color(nsColor: MusicManager.shared.avgColor).gradient : Color.gray.gradient)
+        let width = CGFloat(Defaults[.visualizerBarCount]) * 4
+        return Rectangle()
+            .fill((Defaults[.coloredSpectrogram] ? Color(nsColor: MusicManager.shared.avgColor) : Color.gray).spectrogramGradient())
             .mask {
                 AudioVisualizerView(isPlaying: .constant(MusicManager.shared.isPlaying))
-                    .frame(width: 20, height: 16)
+                    .frame(width: width, height: 16)
             }
-            .frame(width: 20, height: 16)
+            .frame(width: width, height: 16)
             .matchedGeometryEffect(id: "spectrum", in: albumArtNamespace)
     }
     
@@ -664,7 +773,6 @@ private struct MinimalisticReminderDetailsView: View {
     private var progressBar: some View {
         TimelineView(
             .animation(
-                minimumInterval: 1.0,
                 paused: isProgressTimelinePaused
             )
         ) { timeline in
@@ -706,7 +814,7 @@ private struct MinimalisticReminderDetailsView: View {
     // MARK: - Playback Controls (Larger)
     
     private var playbackControls: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 10) {
             ForEach(Array(displayedSlots.enumerated()), id: \.offset) { _, slot in
                 slotView(for: slot)
             }
@@ -834,10 +942,10 @@ private struct MinimalisticReminderDetailsView: View {
     private var playPauseButton: some View {
         MinimalisticSquircircleButton(
             icon: musicManager.isPlaying ? (musicManager.isLiveStream ? "stop.fill" : "pause.fill") : "play.fill",
-            fontSize: 28,
+            fontSize: 26,
             fontWeight: .semibold,
-            frameSize: CGSize(width: 60, height: 60),
-            cornerRadius: 24,
+            frameSize: CGSize(width: 54, height: 54),
+            cornerRadius: 22,
             foregroundColor: .white,
             pressEffect: .none,
             symbolEffectStyle: .replace,
@@ -867,8 +975,8 @@ private struct MinimalisticReminderDetailsView: View {
             icon: icon,
             fontSize: size,
             fontWeight: .medium,
-            frameSize: CGSize(width: 40, height: 40),
-            cornerRadius: 16,
+            frameSize: CGSize(width: 36, height: 36),
+            cornerRadius: 14,
             foregroundColor: isActive ? resolvedActiveColor : .white.opacity(0.85),
             pressEffect: pressEffect,
             symbolEffectStyle: symbolEffect,
@@ -993,8 +1101,8 @@ private struct MinimalisticReminderDetailsView: View {
                 icon: routeManager.activeDevice?.iconName ?? "speaker.wave.2",
                 fontSize: 18,
                 fontWeight: .medium,
-                frameSize: CGSize(width: 40, height: 40),
-                cornerRadius: 16,
+                frameSize: CGSize(width: 36, height: 36),
+                cornerRadius: 14,
                 foregroundColor: .white.opacity(0.85),
                 symbolEffectStyle: .replace
             ) {
@@ -1053,8 +1161,8 @@ private struct MinimalisticReminderDetailsView: View {
                 icon: "airplayaudio",
                 fontSize: 18,
                 fontWeight: .medium,
-                frameSize: CGSize(width: 40, height: 40),
-                cornerRadius: 16,
+                frameSize: CGSize(width: 36, height: 36),
+                cornerRadius: 14,
                 foregroundColor: .white.opacity(0.85),
                 symbolEffectStyle: .replace
             ) {
@@ -1167,7 +1275,16 @@ private struct MinimalisticReminderDetailsView: View {
 struct MinimalisticAlbumArtView: View {
     @ObservedObject var musicManager = MusicManager.shared
     @ObservedObject var vm: DynamicIslandViewModel
+    @Default(.showLiveCanvasInDynamicIsland) private var showLiveCanvasInDynamicIsland
     let albumArtNamespace: Namespace.ID
+
+    private var usesLiveCanvasArtwork: Bool {
+        showLiveCanvasInDynamicIsland && musicManager.videoArtworkURL != nil
+    }
+
+    private var albumArtCornerRadius: CGFloat {
+        musicManager.albumArt.size.width / musicManager.albumArt.size.height > 1.0 ? 4 : 12
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -1182,16 +1299,27 @@ struct MinimalisticAlbumArtView: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .background(
-                Image(nsImage: musicManager.albumArt)
-                    .resizable()
-                    .scaledToFill()
+                DynamicIslandArtworkSourceView(
+                    cornerRadius: albumArtCornerRadius,
+                    contentMode: .fill
+                )
             )
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .scaleEffect(x: 1.3, y: 1.4)
+            .clipShape(RoundedRectangle(cornerRadius: albumArtCornerRadius))
+            .scaleEffect(x: 1.04, y: 1.05)
             .rotationEffect(.degrees(92))
-            .blur(radius: 35)
-            .opacity(min(0.6, 1 - max(musicManager.albumArt.getBrightness(), 0.3)))
+            .blur(radius: 14)
+            .opacity(
+                usesLiveCanvasArtwork
+                    ? (musicManager.isPlaying ? 0.35 : 0.12)
+                    : min(0.28, 1 - max(musicManager.albumArt.getBrightness(), 0.3))
+            )
+            .shadow(
+                color: Color(nsColor: musicManager.avgColor).opacity(usesLiveCanvasArtwork ? 0.14 : 0.08),
+                radius: usesLiveCanvasArtwork ? 6 : 4,
+                x: 0,
+                y: 0
+            )
     }
     
     private var albumArtButton: some View {
@@ -1201,13 +1329,10 @@ struct MinimalisticAlbumArtView: View {
                 Color.clear
                     .aspectRatio(1, contentMode: .fit)
                     .background(
-                        
-                        Image(nsImage: musicManager.albumArt)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: musicManager.albumArt.size.width/musicManager.albumArt.size.height > 1.0 ? 4 : 12))
-                        
-                        
+                        DynamicIslandArtworkSourceView(
+                            cornerRadius: albumArtCornerRadius,
+                            contentMode: .fit
+                        )
                     )
                     .clipped()
                     .matchedGeometryEffect(id: "albumArt", in: albumArtNamespace)
