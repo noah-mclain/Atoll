@@ -21,6 +21,7 @@ import UniformTypeIdentifiers
 private enum SettingsTabGroup: String, CaseIterable, Identifiable {
     case core
     case mediaAndDisplay
+    case communications
     case system
     case productivity
     case utilities
@@ -35,6 +36,7 @@ private enum SettingsTabGroup: String, CaseIterable, Identifiable {
         switch self {
         case .core:             return nil
         case .mediaAndDisplay:  return String(localized: "Media & Display")
+        case .communications:   return String(localized: "Communications")
         case .system:           return String(localized: "System")
         case .productivity:     return String(localized: "Productivity")
         case .utilities:        return String(localized: "Utilities")
@@ -52,6 +54,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case lockScreen
     case media
     case devices
+    case notifications
+    case calls
     case extensions
     case timer
     case calendar
@@ -75,6 +79,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general, .appearance:                                          return .core
         case .media, .liveActivities, .lockScreen, .devices:                 return .mediaAndDisplay
+        case .notifications, .calls:                                         return .communications
         case .hudAndOSD, .battery:                                           return .system
         case .timer, .calendar, .notes:                                      return .productivity
         case .clipboard, .screenAssistant, .colorPicker, .shelf,
@@ -93,6 +98,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .lockScreen: return String(localized: "Lock Screen")
         case .media: return String(localized: "Media")
         case .devices: return String(localized: "Devices")
+        case .notifications: return String(localized: "Notifications")
+        case .calls: return String(localized: "Calls")
         case .extensions: return String(localized: "Extensions")
         case .timer: return String(localized: "Timer")
         case .calendar: return String(localized: "Calendar")
@@ -119,6 +126,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .lockScreen: return "lock.laptopcomputer"
         case .media: return "play.laptopcomputer"
         case .devices: return "headphones"
+        case .notifications: return "bell.badge.fill"
+        case .calls: return "phone.fill"
         case .extensions: return "puzzlepiece.extension"
         case .timer: return "timer"
         case .calendar: return "calendar"
@@ -145,6 +154,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .lockScreen: return .orange
         case .media: return .green
         case .devices: return Color(red: 0.1, green: 0.11, blue: 0.12)
+        case .notifications: return .red
+        case .calls: return .green
         case .extensions: return Color(red: 0.557, green: 0.353, blue: 0.957)
         case .timer: return .red
         case .calendar: return .cyan
@@ -479,8 +490,9 @@ struct SettingsView: View {
     }
 
     private var availableTabs: [SettingsTab] {
-        // Ordered to match group layout: core → media & display → system →
-        // productivity → utilities → developer → integrations → info.
+        // Ordered to match group layout: core → media & display →
+        // communications → system → productivity → utilities → developer →
+        // integrations → info.
         let ordered: [SettingsTab] = [
             // Core
             .general,
@@ -490,6 +502,9 @@ struct SettingsView: View {
             .liveActivities,
             .lockScreen,
             .devices,
+            // Communications
+            .notifications,
+            .calls,
             // System
             .hudAndOSD,
             .battery,
@@ -945,6 +960,14 @@ struct SettingsView: View {
         case .devices:
             SettingsForm(tab: .devices) {
                 DevicesSettingsView()
+            }
+        case .notifications:
+            SettingsForm(tab: .notifications) {
+                NotificationSettingsView()
+            }
+        case .calls:
+            SettingsForm(tab: .calls) {
+                CallSettingsView()
             }
         case .extensions:
             SettingsForm(tab: .extensions) {
@@ -3506,6 +3529,11 @@ struct Shelf: View {
                 }
                 .settingsHighlight(id: highlightID("Expanded drag detection area"))
 
+                Defaults.Toggle(key: .enableDropZone) {
+                    Text("Show drop zone when dragging files")
+                }
+                .settingsHighlight(id: highlightID("Show drop zone when dragging files"))
+
                 Defaults.Toggle(key: .copyOnDrag) {
                     Text("Copy items on drag")
                 }
@@ -3658,6 +3686,28 @@ struct LiveActivitiesSettings: View {
                 Text("Screen Recording")
             } footer: {
                 Text("Uses event-driven private API for real-time screen recording detection")
+            }
+
+            Section {
+                Defaults.Toggle(key: .enableNetworkLiveActivity) {
+                    Text("Show network status changes")
+                }
+                .settingsHighlight(id: highlightID("Show network status changes"))
+            } header: {
+                Text("Network")
+            } footer: {
+                Text("Shows a brief HUD when connectivity changes, and a persistent indicator while offline. Wi-Fi network names require Location permission on recent macOS versions.")
+            }
+
+            Section {
+                Defaults.Toggle(key: .enableAgentLiveActivity) {
+                    Text("Show AI coding agent activity")
+                }
+                .settingsHighlight(id: highlightID("Show AI coding agent activity"))
+            } header: {
+                Text("AI Agents")
+            } footer: {
+                Text("Surfaces running Claude Code and Codex CLI sessions with their current tool, by watching their session logs.")
             }
 
             Section {
@@ -4057,6 +4107,10 @@ struct Appearance: View {
                     Text("Enable blur effect behind album art")
                 }
                 .settingsHighlight(id: highlightID("Enable blur effect behind album art"))
+                Defaults.Toggle(key: .liveAlbumArt) {
+                    Text("Live album art (animated glow while playing)")
+                }
+                .settingsHighlight(id: highlightID("Live album art (animated glow while playing)"))
                 Picker("Slider color", selection: $sliderColor) {
                     ForEach(SliderColorEnum.allCases, id: \.self) { option in
                         Text(option.rawValue)

@@ -55,6 +55,10 @@ struct ContentView: View {
     @ObservedObject var localSendService = LocalSendService.shared
     @State private var downloadManager = DownloadManager.shared
     @ObservedObject var shelfState = ShelfStateViewModel.shared
+    @ObservedObject var notificationObserver = NotificationObserver.shared
+    @ObservedObject var callMonitor = CallMonitor.shared
+    @ObservedObject var networkManager = NetworkStatusManager.shared
+    @ObservedObject var agentMonitor = AgentActivityMonitor.shared
     
     @Default(.enableStatsFeature) var enableStatsFeature
     @Default(.showCpuGraph) var showCpuGraph
@@ -600,6 +604,41 @@ struct ContentView: View {
         .environmentObject(webcamManager)
     }
 
+    /// Content rendered when `coordinator.currentView == .communication`.
+    /// Calls take precedence over notifications.
+    @ViewBuilder
+    private var communicationContent: some View {
+        if case .ringing(let call) = callMonitor.callState {
+            CallBannerView(
+                call: call,
+                onAccept: { callMonitor.acceptCall(call) },
+                onDecline: { callMonitor.declineCall(call) }
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        } else if let notif = notificationObserver.latestNotification {
+            NotificationBannerView(
+                notification: notif,
+                onDismiss: { notificationObserver.dismiss(notif) },
+                onReply: { text in
+                    QuickReplyDispatcher.send(reply: text, for: notif)
+                }
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        } else {
+            // Nothing to show — flip back to home next runloop tick.
+            Color.clear
+                .onAppear {
+                    DispatchQueue.main.async {
+                        if coordinator.currentView == .communication {
+                            coordinator.currentView = .home
+                        }
+                    }
+                }
+        }
+    }
+
     private func installRootLifecycleHandlers<Content: View>(on view: Content) -> some View {
         installSecondaryRootLifecycleHandlers(
             on: installPrimaryRootLifecycleHandlers(on: view)
@@ -833,6 +872,12 @@ struct ContentView: View {
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && localSendLiveActivityActive && !vm.hideOnClosed {
                           LocalSendLiveActivity()
                               .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
+                      } else if !coordinator.expandingView.show && vm.notchState == .closed && Defaults[.enableNetworkLiveActivity] && (networkManager.showChangeEvent || networkManager.isOffline) && !vm.hideOnClosed && !lockScreenManager.isLocked {
+                          NetworkLiveActivity()
+                              .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
+                      } else if !coordinator.expandingView.show && vm.notchState == .closed && Defaults[.enableAgentLiveActivity] && agentMonitor.hasActivity && !vm.hideOnClosed && !lockScreenManager.isLocked {
+                          AgentLiveActivity()
+                              .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .doNotDisturb) && vm.notchState == .closed && Defaults[.enableDoNotDisturbDetection] && Defaults[.showDoNotDisturbIndicator] && (doNotDisturbManager.isDoNotDisturbActive || doNotDisturbManager.isFocusToastDismissing) && !vm.hideOnClosed && !lockScreenManager.isLocked {
                           DoNotDisturbLiveActivity()
                     } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .lockScreen) && vm.notchState == .closed && (lockScreenManager.isLocked || !lockScreenManager.isLockIdle) && Defaults[.enableLockScreenLiveActivity] && !vm.hideOnClosed {
@@ -982,6 +1027,8 @@ struct ContentView: View {
                                 } else {
                                     NotchHomeView(albumArtNamespace: albumArtNamespace)
                                 }
+                            case .communication:
+                                communicationContent
                           }
                       }
                       .id(coordinator.currentView)

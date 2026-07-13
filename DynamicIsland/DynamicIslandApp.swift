@@ -112,6 +112,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let systemTimerBridge = SystemTimerBridge.shared
     let extensionXPCServiceHost = ExtensionXPCServiceHost.shared
     let extensionRPCServer = ExtensionRPCServer.shared
+    let notificationObserver = NotificationObserver.shared  // NEW: System notification banners
+    let callMonitor = CallMonitor.shared  // NEW: Incoming call surfacing
     var closeNotchWorkItem: DispatchWorkItem?
     private var previousScreens: [NSScreen]?
     private var onboardingWindowController: NSWindowController?
@@ -409,6 +411,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
             let maxFraction = Defaults[.terminalMaxHeightFraction]
             baseSize.height = min(screenHeight * maxFraction, max(300, screenHeight * maxFraction))
+        } else if coordinator.currentView == .communication {
+            // Call pill needs ~120pt of content area; notification banner ~160
+            // when the reply field is expanded. Pick the taller of the two.
+            baseSize.height = max(baseSize.height, 200)
         }
         
         let adjustedContentSize = statsAdjustedNotchSize(
@@ -496,6 +502,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         LockScreenManager.shared.configure(viewModel: vm)
         extensionXPCServiceHost.start()
         extensionRPCServer.start()
+        DropZoneManager.shared.start()
         
         // Migrate legacy progress bar settings
         Defaults.Keys.migrateProgressBarStyle()
