@@ -240,6 +240,13 @@ final class NotificationObserver: NSObject, ObservableObject {
     }
 
     private func pollAttachedWindows() {
+        // Re-discover hosts: a banner window's owner only shows up in the
+        // on-screen list while it's visible, so attach to newcomers here.
+        for (pid, name) in Self.findCandidatePIDs() where attached[pid] == nil {
+            install(pid: pid, name: name)
+        }
+        isInstalled = !attached.isEmpty
+
         for entry in attached.values {
             scanWindows(of: entry.appElement, source: "poll: \(entry.name)")
         }
@@ -263,20 +270,45 @@ final class NotificationObserver: NSObject, ObservableObject {
         var windows = (windowsRef as? [AXUIElement]) ?? []
 
         // Some banner hosts (macOS 26's usernotificationcenter among them)
-        // don't list banners under AXWindows — fall back to the app
-        // element's direct children.
+        // don't list banners under AXWindows — descend the tree for any
+        // window-role elements. Menus and the menu bar are excluded so we
+        // never mistake system chrome for a notification.
         if windows.isEmpty {
-            var childrenRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(appElement, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-               let children = childrenRef as? [AXUIElement] {
-                windows = children
-            }
+            windows = Self.descendantWindows(of: appElement, maxDepth: 4)
         }
 
         logScanTransition(source: source, status: status, count: windows.count)
         for window in windows {
             process(window: window, source: source)
         }
+    }
+
+    /// Collects `AXWindow`-role elements beneath `root`, pruning the menu bar
+    /// and menus so only real banner windows come back.
+    private static func descendantWindows(of root: AXUIElement, maxDepth: Int) -> [AXUIElement] {
+        var found: [AXUIElement] = []
+        func walk(_ element: AXUIElement, depth: Int) {
+            guard depth <= maxDepth, found.count < 16 else { return }
+
+            var roleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+            let role = roleRef as? String
+
+            // Never descend into the menu bar / menus — that path only holds
+            // the Apple menu, never notifications.
+            if role == kAXMenuBarRole || role == kAXMenuRole || role == kAXMenuItemRole || role == kAXMenuBarItemRole {
+                return
+            }
+            if role == kAXWindowRole { found.append(element) }
+
+            var childrenRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+               let children = childrenRef as? [AXUIElement] {
+                for child in children { walk(child, depth: depth + 1) }
+            }
+        }
+        walk(root, depth: 0)
+        return found
     }
 
     /// Logs once whenever a source's scan status or window count changes,
@@ -290,6 +322,14 @@ final class NotificationObserver: NSObject, ObservableObject {
     }
 
     private func process(window: AXUIElement, source: String) {
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &roleRef)
+        let role = roleRef as? String
+
+        // Only real windows can be banners. The menu bar and menus reach here
+        // on some hosts; reject them before they pollute the feed.
+        guard role == kAXWindowRole else { return }
+
         guard let signature = Self.signatureFor(window: window) else { return }
         guard !seenWindowSignatures.contains(signature) else { return }
         seenWindowSignatures.insert(signature)
@@ -297,17 +337,14 @@ final class NotificationObserver: NSObject, ObservableObject {
             seenWindowSignatures.removeAll(keepingCapacity: true)
         }
 
-        var roleRef: CFTypeRef?
-        AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &roleRef)
         var subroleRef: CFTypeRef?
         AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subroleRef)
-        atollNotifLog("NEW BANNER from \(source) " +
-                      "[role=\(roleRef as? String ?? "?") subrole=\(subroleRef as? String ?? "-")]:\n    \(signature)")
+        atollNotifLog("candidate window from \(source) " +
+                      "[role=\(role ?? "?") subrole=\(subroleRef as? String ?? "-")]:\n    \(signature)")
 
         if let notification = NotificationParser.parse(window: window) {
+            atollNotifLog("→ parsed as banner: \(notification.source.displayName) / \(notification.senderName)")
             receive(notification)
-        } else {
-            atollNotifLog("Parser returned nil for window; treating as non-banner.")
         }
     }
 
@@ -412,6 +449,27 @@ final class NotificationObserver: NSObject, ObservableObject {
                 let name = String(cString: nameBuffer).lowercased()
                 if lowered.contains(where: { name == $0 }) {
                     results.append((pid, name))
+                }
+            }
+        }
+
+        // 3. On-screen window owners — the surest way to find whoever is
+        //    actually drawing a banner right now, independent of daemon
+        //    naming. Only fires while a banner (or the notification host) is
+        //    on screen, so the poll re-runs this to catch late arrivals.
+        if let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] {
+            for info in windowList {
+                guard
+                    let owner = info[kCGWindowOwnerName as String] as? String,
+                    let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                    pid > 0
+                else { continue }
+                let lowerOwner = owner.lowercased()
+                let looksLikeHost = lowerOwner.contains("notification") || lowerOwner.contains("usernoted")
+                if looksLikeHost, !results.contains(where: { $0.0 == pid }) {
+                    results.append((pid, lowerOwner))
                 }
             }
         }

@@ -22,6 +22,7 @@ enum NotificationParser {
     static func parse(window: AXUIElement) -> AtollNotification? {
         let strings = harvestStrings(from: window)
         guard !strings.isEmpty else { return nil }
+        guard isBannerShaped(strings) else { return nil }
 
         // The app icon is usually backed by a file URL pointing into
         // /Applications/<AppName>.app/.../Icon.icns. That gives us the most
@@ -124,6 +125,25 @@ enum NotificationParser {
             }
         }
         return nil
+    }
+
+    // MARK: - Shape validation
+
+    /// Rejects windows that clearly aren't notification banners — chiefly the
+    /// system menu bar, which some banner hosts vend as an AX child. Real
+    /// banners carry a handful of labels; a menu leaks dozens plus tell-tale
+    /// system entries.
+    private static func isBannerShaped(_ strings: [String]) -> Bool {
+        if strings.count > 12 { return false }
+
+        let menuMarkers = [
+            "About This Mac", "System Settings", "System Information",
+            "Recent Items", "in Finder", "Force Quit", "Hide Others",
+        ]
+        let looksLikeMenu = strings.contains { candidate in
+            menuMarkers.contains { candidate.localizedCaseInsensitiveContains($0) }
+        }
+        return !looksLikeMenu
     }
 
     // MARK: - Heuristics
