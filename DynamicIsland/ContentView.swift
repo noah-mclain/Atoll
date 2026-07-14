@@ -1155,6 +1155,8 @@ struct ContentView: View {
                                 communicationContent
                             case .agent:
                                 AgentNotchView()
+                            case .notifications:
+                                NotchNotificationsView()
                           }
                       }
                       .id(coordinator.currentView)

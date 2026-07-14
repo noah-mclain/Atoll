@@ -43,6 +43,12 @@ final class NotificationObserver: NSObject, ObservableObject {
     @Published private(set) var pendingNotifications: [AtollNotification] = []
     @Published private(set) var latestNotification: AtollNotification?
     @Published private(set) var isInstalled: Bool = false
+    /// Recently received notifications, newest first — the notch's own
+    /// scrollback so a banner that auto-hides can still be reviewed and
+    /// replied to. In-memory for the session.
+    @Published private(set) var history: [AtollNotification] = []
+
+    private static let historyLimit = 60
 
     /// The process names we'll try to attach to. Order matters only for
     /// logging; we install on all that resolve.
@@ -229,7 +235,7 @@ final class NotificationObserver: NSObject, ObservableObject {
 
     private func startPollTimer() {
         guard pollTimer == nil else { return }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.pollAttachedWindows() }
         }
     }
@@ -361,15 +367,42 @@ final class NotificationObserver: NSObject, ObservableObject {
 
         pendingNotifications.append(notification)
         latestNotification = notification
+        history.insert(notification, at: 0)
+        if history.count > Self.historyLimit {
+            history.removeLast(history.count - Self.historyLimit)
+        }
         Self.enterCommunicationMode()
 
+        scheduleAutoDismiss(for: notification)
+    }
+
+    private func scheduleAutoDismiss(for notification: AtollNotification) {
         let duration = NotificationSettings.shared.displayDuration(for: notification.source)
+        dismissTimers[notification.id]?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.dismiss(id: notification.id)
             }
         }
         dismissTimers[notification.id] = timer
+    }
+
+    /// Pauses the auto-hide countdown while the user is interacting with the
+    /// banner (hovering, typing a reply). Resumed when they move away.
+    func holdCurrentNotification() {
+        for (id, timer) in dismissTimers {
+            timer.invalidate()
+            dismissTimers.removeValue(forKey: id)
+        }
+    }
+
+    func resumeCurrentNotification() {
+        guard let current = latestNotification, dismissTimers[current.id] == nil else { return }
+        scheduleAutoDismiss(for: current)
+    }
+
+    func clearHistory() {
+        history.removeAll()
     }
 
     func dismiss(_ notification: AtollNotification) {

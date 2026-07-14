@@ -24,52 +24,66 @@ enum NotificationParser {
         guard !strings.isEmpty else { return nil }
         guard isBannerShaped(strings) else { return nil }
 
-        // The app icon is usually backed by a file URL pointing into
-        // /Applications/<AppName>.app/.../Icon.icns. That gives us the most
-        // reliable bundle-ID hint; if we can't find it, we'll fall back to
-        // matching the app-name string in the AX tree.
-        let iconAppPath = findAppPathFromImageChildren(in: window)
+        // macOS 14–26 Notification Center exposes a banner's text as:
+        //   [ "Notification Center", "<App>, <Sender>, <Body>", "<Sender>", "<Body>" ]
+        // The first entry is the container title, the second is a combined
+        // summary whose first comma-separated field is the app name, and the
+        // rest are the isolated sender and body — which we prefer, since a
+        // body may itself contain commas.
+        let fields = strings
+            .map(sanitize)
+            .filter { !$0.isEmpty && $0.caseInsensitiveCompare("Notification Center") != .orderedSame }
+        guard !fields.isEmpty else { return nil }
 
-        let bundleID: String
+        let summaryParts = fields[0].components(separatedBy: ", ")
+        let appNameHint = summaryParts.first ?? fields[0]
+
+        // The app icon is usually backed by a file URL into the .app bundle,
+        // giving the most reliable identity; fall back to the app-name hint.
         let source: NotificationAppSource
-
-        if let path = iconAppPath,
+        let bundleID: String
+        if let path = findAppPathFromImageChildren(in: window),
            let bundle = Bundle(url: URL(fileURLWithPath: path)),
            let id = bundle.bundleIdentifier {
+            source = .from(bundleID: id)
             bundleID = id
-            source = NotificationAppSource.from(bundleID: id)
-        } else if let hintMatch = strings.lazy.compactMap({ inferSource(from: $0) }).first {
-            source = hintMatch
-            bundleID = source.rawValue
         } else {
-            source = .generic
-            bundleID = ""
+            source = .from(displayHint: appNameHint)
+            bundleID = source.rawValue
         }
 
-        // Layout heuristics:
-        //   strings[0]: app name (often), e.g. "WhatsApp"
-        //   strings[1]: sender / title, e.g. "Jamie"
-        //   strings[2..]: body text + any reply hints
-        // We strip the app-name string from the candidate sender/body if it
-        // appears, so we don't echo "WhatsApp · WhatsApp".
-        let appName = source.displayName
-        var cleaned = strings.filter { $0.caseInsensitiveCompare(appName) != .orderedSame }
+        let appName = (source == .generic ? appNameHint : source.displayName)
+            .trimmedNonEmpty ?? "Notification"
 
-        if cleaned.isEmpty { cleaned = strings }
+        // Sender + body: prefer the isolated fields, fall back to splitting
+        // the combined summary.
+        var senderName: String
+        var body: String
+        if fields.count >= 3 {
+            senderName = fields[1]
+            body = fields[2...].filter { !isLikelyActionLabel($0) }.joined(separator: " ")
+        } else if summaryParts.count >= 3 {
+            senderName = summaryParts[1]
+            body = summaryParts[2...].joined(separator: ", ")
+        } else if fields.count == 2 {
+            senderName = fields[0]
+            body = fields[1]
+        } else {
+            senderName = appName
+            body = fields[0]
+        }
 
-        // For some apps the title pattern is "Sender — Group" or "Sender (n messages)".
-        let senderRaw = cleaned.first ?? appName
-        let (senderName, subtitle) = splitSenderAndSubtitle(senderRaw)
-        let body = cleaned.dropFirst().filter { !isLikelyActionLabel($0) }.joined(separator: " ").trimmedNonEmpty
-            ?? (cleaned.count > 1 ? cleaned[1] : "")
+        let (splitSender, subtitle) = splitSenderAndSubtitle(senderName)
+        senderName = splitSender.trimmedNonEmpty ?? appName
+        body = clampBody(body)
 
         let voiceHint = detectVoiceMessage(body: body)
         let displayBody = voiceHint ? voiceMessageDisplayBody(for: source) : body
-
         let avatar = resolveContactImage(name: senderName)
 
         return AtollNotification(
             source: source,
+            appName: appName,
             bundleID: bundleID.isEmpty ? source.rawValue : bundleID,
             senderName: senderName,
             senderAvatarImage: avatar,
@@ -80,6 +94,24 @@ enum NotificationParser {
             timestamp: Date(),
             axBannerRef: window
         )
+    }
+
+    /// Strips the bidirectional marks Notification Center injects around
+    /// non-Latin app/sender names, plus surrounding whitespace.
+    private static func sanitize(_ string: String) -> String {
+        string
+            .replacingOccurrences(of: "\u{200E}", with: "")
+            .replacingOccurrences(of: "\u{200F}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Notifications from noisy apps (e.g. clipboard managers echoing logs)
+    /// can carry huge bodies; keep the UI sane.
+    private static func clampBody(_ body: String) -> String {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let limit = 300
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit)) + "…"
     }
 
     // MARK: - AX harvesting
@@ -147,11 +179,6 @@ enum NotificationParser {
     }
 
     // MARK: - Heuristics
-
-    private static func inferSource(from text: String) -> NotificationAppSource? {
-        let candidate = NotificationAppSource.from(displayHint: text)
-        return candidate == .generic ? nil : candidate
-    }
 
     private static func splitSenderAndSubtitle(_ raw: String) -> (sender: String, subtitle: String?) {
         // Common separators: "Sender — Group", "Sender · Group", "Sender (3 messages)"

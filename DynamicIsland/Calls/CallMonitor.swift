@@ -107,11 +107,15 @@ final class CallMonitor: NSObject, ObservableObject {
         let senderLower = notification.senderName.lowercased()
         let isCallShaped =
             bodyLower.contains("incoming call")
+            || bodyLower.contains("incoming voice call")
+            || bodyLower.contains("incoming video call")
             || bodyLower.contains("is calling")
             || bodyLower.contains("calling…")
             || bodyLower.contains("calling...")
-            || (notification.source == .facetime && bodyLower.contains("would like"))
-            || (notification.source == .facetime && senderLower.contains("facetime"))
+            || bodyLower.contains("would like to facetime")
+            // FaceTime banners are effectively always a live call, except the
+            // "missed call" follow-up, which stays a normal notification.
+            || (notification.source == .facetime && !bodyLower.contains("missed"))
 
         guard isCallShaped else { return nil }
 

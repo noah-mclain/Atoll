@@ -88,6 +88,8 @@ public enum NotchViews {
     /// Expanded AI coding-agent view (Claude Code / Codex) — checklist of
     /// recent tool calls plus the latest assistant text.
     case agent
+    /// Scrollback of recently received notifications, with inline reply.
+    case notifications
 }
 
 enum NotesLayoutState: Equatable {

@@ -99,6 +99,9 @@ enum NotificationAppSource: String, Codable, CaseIterable {
 struct AtollNotification: Identifiable, Equatable {
     let id: UUID
     let source: NotificationAppSource
+    /// Human app name — the source's display name, or the raw app name from
+    /// the banner when the source is unrecognized (e.g. "Maccy").
+    let appName: String
     let bundleID: String
     let senderName: String
     let senderAvatarImage: NSImage?
@@ -114,6 +117,7 @@ struct AtollNotification: Identifiable, Equatable {
     init(
         id: UUID = UUID(),
         source: NotificationAppSource,
+        appName: String? = nil,
         bundleID: String,
         senderName: String,
         senderAvatarImage: NSImage? = nil,
@@ -126,6 +130,7 @@ struct AtollNotification: Identifiable, Equatable {
     ) {
         self.id = id
         self.source = source
+        self.appName = appName ?? source.displayName
         self.bundleID = bundleID
         self.senderName = senderName
         self.senderAvatarImage = senderAvatarImage

@@ -40,6 +40,20 @@ struct NotificationBannerView: View {
                 )
         )
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: showReplyField)
+        .onAppear {
+            // Messaging apps open straight into the reply field, iOS-style.
+            if notification.source.supportsQuickReply {
+                showReplyField = true
+            }
+        }
+        .onHover { hovering in
+            // Don't let the banner auto-hide out from under an active reply.
+            if hovering {
+                NotificationObserver.shared.holdCurrentNotification()
+            } else {
+                NotificationObserver.shared.resumeCurrentNotification()
+            }
+        }
     }
 
     // MARK: - Subviews

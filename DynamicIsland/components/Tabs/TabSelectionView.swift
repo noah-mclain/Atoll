@@ -47,6 +47,7 @@ struct TabSelectionView: View {
     @ObservedObject var coordinator = DynamicIslandViewCoordinator.shared
     @ObservedObject private var extensionNotchExperienceManager = ExtensionNotchExperienceManager.shared
     @ObservedObject private var agentMonitor = AgentActivityMonitor.shared
+    @ObservedObject private var notificationObserver = NotificationObserver.shared
     @StateObject private var quickShareService = QuickShareService.shared
     @Default(.quickShareProvider) private var quickShareProvider
     @State private var showQuickSharePopover = false
@@ -99,6 +100,10 @@ struct TabSelectionView: View {
         // Agent tab surfaces only while a coding agent is actually running.
         if Defaults[.enableAgentLiveActivity] && agentMonitor.hasActivity {
             tabsArray.append(TabModel(label: "Agent", icon: "sparkle", view: .agent))
+        }
+        // Notifications scrollback appears once anything has been received.
+        if !notificationObserver.history.isEmpty {
+            tabsArray.append(TabModel(label: "Alerts", icon: "bell.fill", view: .notifications))
         }
         if extensionTabsEnabled {
             for payload in extensionTabPayloads {
