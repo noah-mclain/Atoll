@@ -46,6 +46,7 @@ struct TabModel: Identifiable {
 struct TabSelectionView: View {
     @ObservedObject var coordinator = DynamicIslandViewCoordinator.shared
     @ObservedObject private var extensionNotchExperienceManager = ExtensionNotchExperienceManager.shared
+    @ObservedObject private var agentMonitor = AgentActivityMonitor.shared
     @StateObject private var quickShareService = QuickShareService.shared
     @Default(.quickShareProvider) private var quickShareProvider
     @State private var showQuickSharePopover = false
@@ -94,6 +95,10 @@ struct TabSelectionView: View {
         }
         if Defaults[.enableTerminalFeature] {
             tabsArray.append(TabModel(label: "Terminal", icon: "apple.terminal", view: .terminal))
+        }
+        // Agent tab surfaces only while a coding agent is actually running.
+        if Defaults[.enableAgentLiveActivity] && agentMonitor.hasActivity {
+            tabsArray.append(TabModel(label: "Agent", icon: "sparkle", view: .agent))
         }
         if extensionTabsEnabled {
             for payload in extensionTabPayloads {

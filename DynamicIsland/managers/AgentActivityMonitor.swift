@@ -10,16 +10,32 @@
 
 import Combine
 import Foundation
+import SwiftUI
+
+/// A single tool invocation surfaced in the agent checklist.
+struct AgentToolCall: Identifiable, Equatable {
+    let id: String       // the tool_use id, or a synthesized fallback
+    let label: String    // e.g. "Reading nz_2.png", "Running grep -n"
+    var isComplete: Bool // has a matching tool_result arrived?
+}
 
 struct AgentSession: Identifiable, Equatable {
     enum Kind: String {
-        case claudeCode = "Claude Code"
+        case claudeCode = "Claude"
         case codex = "Codex"
 
+        /// SF Symbol for the header/inline icon.
         var iconName: String {
             switch self {
             case .claudeCode: return "sparkle"
-            case .codex:      return "terminal"
+            case .codex:      return "chevron.left.forwardslash.chevron.right"
+            }
+        }
+
+        var accent: Color {
+            switch self {
+            case .claudeCode: return Color(red: 0.85, green: 0.47, blue: 0.26) // Claude orange
+            case .codex:      return Color(red: 0.30, green: 0.52, blue: 0.96) // Codex blue
             }
         }
     }
@@ -38,6 +54,31 @@ struct AgentSession: Identifiable, Equatable {
     var state: ActivityState
     var lastActivity: Date
     var currentTool: String?
+    /// Recent tool calls, oldest first; the last is current while working.
+    var toolCalls: [AgentToolCall] = []
+    /// Latest assistant prose, shown in the detail bubble.
+    var latestText: String?
+    /// Human-friendly session summary, if the transcript carries one.
+    var title: String?
+
+    /// Header status line, e.g. "Thinking", "Working on your task".
+    var statusLabel: String {
+        switch state {
+        case .waiting:
+            return "Waiting for your input"
+        case .working:
+            switch kind {
+            case .claudeCode: return "Thinking"
+            case .codex:      return "Working on your task"
+            }
+        }
+    }
+
+    /// Title for compact surfaces: the transcript summary, else the project.
+    var displayTitle: String {
+        if let title, !title.isEmpty { return title }
+        return projectName
+    }
 }
 
 /// Surfaces running AI coding-agent sessions (Claude Code, Codex CLI) as a
@@ -68,7 +109,18 @@ final class AgentActivityMonitor: ObservableObject {
 
     private var pollTimer: Timer?
     private var lastKnownSizes: [String: UInt64] = [:]
-    private var lastKnownTools: [String: String] = [:]
+    private var lastKnownParses: [String: ParsedTranscript] = [:]
+
+    /// The slice of a transcript we surface in the UI.
+    private struct ParsedTranscript: Equatable {
+        var toolCalls: [AgentToolCall] = []
+        var latestText: String?
+        var title: String?
+        var currentTool: String?
+    }
+
+    /// How many trailing tool calls to keep for the checklist.
+    private static let checklistDepth = 5
 
     private init() {
         start()
@@ -178,20 +230,27 @@ final class AgentActivityMonitor: ObservableObject {
         let age = Date().timeIntervalSince(modified)
         guard age < Self.sessionTimeout else {
             lastKnownSizes.removeValue(forKey: logURL.path)
-            lastKnownTools.removeValue(forKey: logURL.path)
+            lastKnownParses.removeValue(forKey: logURL.path)
             return nil
         }
 
         let state: AgentSession.ActivityState = age < Self.workingThreshold ? .working : .waiting
 
-        var tool: String? = lastKnownTools[logURL.path]
+        // Re-parse only when the file actually grew — parsing is the only
+        // expensive step, so cache the last result per path.
+        var parsed = lastKnownParses[logURL.path] ?? ParsedTranscript()
         let size = UInt64(values.fileSize ?? 0)
-        if state == .working, lastKnownSizes[logURL.path] != size {
+        if lastKnownSizes[logURL.path] != size {
             lastKnownSizes[logURL.path] = size
-            if let parsed = Self.currentToolName(in: logURL) {
-                tool = parsed
-                lastKnownTools[logURL.path] = parsed
-            }
+            parsed = Self.parseTranscript(in: logURL, kind: kind)
+            lastKnownParses[logURL.path] = parsed
+        }
+
+        // While the agent is working, the last tool call is still in flight;
+        // once it goes quiet, everything it launched has settled.
+        var toolCalls = parsed.toolCalls
+        if state != .working {
+            for index in toolCalls.indices { toolCalls[index].isComplete = true }
         }
 
         return AgentSession(
@@ -200,44 +259,132 @@ final class AgentActivityMonitor: ObservableObject {
             projectName: projectName,
             state: state,
             lastActivity: modified,
-            currentTool: state == .working ? tool : nil
+            currentTool: state == .working ? parsed.currentTool : nil,
+            toolCalls: toolCalls,
+            latestText: parsed.latestText,
+            title: parsed.title
         )
     }
 
     // MARK: - Log parsing
 
-    /// Reads the tail of the JSONL transcript and returns the most recent
-    /// tool_use name, if the last assistant event was a tool call.
-    private static func currentToolName(in url: URL) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+    /// Reads the tail of the JSONL transcript and reconstructs the recent
+    /// tool-call checklist, the latest assistant prose, and a session title.
+    private static func parseTranscript(in url: URL, kind: AgentSession.Kind) -> ParsedTranscript {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return ParsedTranscript() }
         defer { try? handle.close() }
 
-        let tailLength: UInt64 = 16_384
+        let tailLength: UInt64 = 64_000
         let fileSize = (try? handle.seekToEnd()) ?? 0
         let offset = fileSize > tailLength ? fileSize - tailLength : 0
         try? handle.seek(toOffset: offset)
         guard let data = try? handle.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return nil }
+              let text = String(data: data, encoding: .utf8) else { return ParsedTranscript() }
 
-        for line in text.split(separator: "\n").reversed() {
+        var ordered: [(id: String, label: String)] = []
+        var resultIDs: Set<String> = []
+        var latestText: String?
+        var title: String?
+        var syntheticIndex = 0
+
+        // Chronological pass so ordering and completion resolve naturally.
+        for line in text.split(separator: "\n") {
             guard
                 let lineData = line.data(using: .utf8),
                 let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
             else { continue }
 
-            // Claude Code shape: {"type":"assistant","message":{"content":[{"type":"tool_use","name":…}]}}
+            if let summary = object["summary"] as? String, !summary.isEmpty {
+                title = summary
+            }
+
+            // Claude Code: assistant/user messages carry a content array.
             if let message = object["message"] as? [String: Any],
                let content = message["content"] as? [[String: Any]] {
-                for block in content.reversed() where (block["type"] as? String) == "tool_use" {
-                    return block["name"] as? String
+                for block in content {
+                    switch block["type"] as? String {
+                    case "tool_use":
+                        let id = block["id"] as? String ?? "auto-\(syntheticIndex)"
+                        syntheticIndex += 1
+                        ordered.append((id, friendlyLabel(tool: block["name"] as? String ?? "", input: block["input"] as? [String: Any])))
+                    case "tool_result":
+                        if let id = block["tool_use_id"] as? String { resultIDs.insert(id) }
+                    case "text":
+                        if let t = (block["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+                            latestText = t
+                        }
+                    default:
+                        break
+                    }
                 }
+                continue
             }
-            // Codex shape: {"type":"function_call","name":…} or nested payloads.
-            if (object["type"] as? String)?.contains("function_call") == true {
-                return object["name"] as? String
+
+            // Codex rollout: flat function_call / function_call_output records.
+            switch object["type"] as? String {
+            case let type? where type.contains("function_call_output"):
+                if let id = object["call_id"] as? String { resultIDs.insert(id) }
+            case let type? where type.contains("function_call"):
+                let id = object["call_id"] as? String ?? "auto-\(syntheticIndex)"
+                syntheticIndex += 1
+                ordered.append((id, friendlyLabel(tool: object["name"] as? String ?? "", input: object["arguments"] as? [String: Any])))
+            case "message":
+                if let content = object["content"] as? [[String: Any]] {
+                    for block in content where (block["type"] as? String)?.contains("text") == true {
+                        if let t = (block["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+                            latestText = t
+                        }
+                    }
+                }
+            default:
+                break
             }
         }
-        return nil
+
+        let recent = ordered.suffix(checklistDepth).map {
+            AgentToolCall(id: $0.id, label: $0.label, isComplete: resultIDs.contains($0.id))
+        }
+        let currentTool = recent.last(where: { !$0.isComplete })?.label ?? recent.last?.label
+
+        return ParsedTranscript(
+            toolCalls: recent,
+            latestText: latestText.map(truncateForBubble),
+            title: title,
+            currentTool: currentTool
+        )
+    }
+
+    /// Turns a raw tool call into a human phrase like "Reading main.swift"
+    /// or "Running grep -n", matching the checklist styling.
+    private static func friendlyLabel(tool: String, input: [String: Any]?) -> String {
+        func basename(_ key: String) -> String? {
+            (input?[key] as? String).map { ($0 as NSString).lastPathComponent }
+        }
+        switch tool {
+        case "Read":                 return "Reading \(basename("file_path") ?? "a file")"
+        case "Write":                return "Writing \(basename("file_path") ?? "a file")"
+        case "Edit", "MultiEdit":    return "Editing \(basename("file_path") ?? "a file")"
+        case "Bash", "shell":
+            let command = (input?["command"] as? String)
+                ?? ((input?["command"] as? [String])?.joined(separator: " "))
+                ?? ""
+            let head = command.split(whereSeparator: { $0 == " " || $0 == "\n" }).prefix(2).joined(separator: " ")
+            return head.isEmpty ? "Running a command" : "Running \(head)"
+        case "Grep":                 return "Searching \(input?["pattern"] as? String ?? "the code")"
+        case "Glob":                 return "Finding files"
+        case "Task":                 return "Delegating to a subagent"
+        case "WebFetch":             return "Fetching \(URL(string: input?["url"] as? String ?? "")?.host ?? "a page")"
+        case "WebSearch":            return "Searching the web"
+        case "TodoWrite":            return "Updating the task list"
+        case "":                     return "Working"
+        default:                     return tool
+        }
+    }
+
+    private static func truncateForBubble(_ text: String) -> String {
+        let limit = 240
+        guard text.count > limit else { return text }
+        return String(text.prefix(limit)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
     }
 
     /// Claude Code encodes the project path into the folder name by

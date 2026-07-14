@@ -19,6 +19,7 @@ import SwiftUI
 struct AgentLiveActivity: View {
     @EnvironmentObject var vm: DynamicIslandViewModel
     @ObservedObject private var monitor = AgentActivityMonitor.shared
+    @ObservedObject private var coordinator = DynamicIslandViewCoordinator.shared
 
     @State private var pulse = false
 
@@ -28,6 +29,10 @@ struct AgentLiveActivity: View {
 
     private var isWorking: Bool {
         !monitor.workingSessions.isEmpty
+    }
+
+    private var accent: Color {
+        primary?.kind.accent ?? .orange
     }
 
     private var rightLabel: String {
@@ -46,7 +51,7 @@ struct AgentLiveActivity: View {
         HStack(spacing: 0) {
             Image(systemName: primary?.kind.iconName ?? "sparkle")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isWorking ? Color.orange : Color.gray)
+                .foregroundStyle(isWorking ? accent : Color.gray)
                 .opacity(isWorking && pulse ? 0.4 : 1.0)
                 .frame(width: 24, alignment: .leading)
                 .onAppear { startPulsing() }
@@ -58,7 +63,7 @@ struct AgentLiveActivity: View {
 
             Text(rightLabel)
                 .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(isWorking ? Color.orange : Color.gray)
+                .foregroundStyle(isWorking ? accent : Color.gray)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .contentTransition(.opacity)
@@ -66,6 +71,10 @@ struct AgentLiveActivity: View {
                 .frame(width: 76, alignment: .trailing)
         }
         .frame(height: vm.effectiveClosedNotchHeight, alignment: .center)
+        .onTapGesture {
+            coordinator.currentView = .agent
+            AppDelegate.shared?.vm.open()
+        }
     }
 
     private func startPulsing() {

@@ -85,6 +85,9 @@ public enum NotchViews {
     /// banner from NotificationObserver / CallMonitor. Entered programmatically
     /// when a banner arrives; exited when it's dismissed.
     case communication
+    /// Expanded AI coding-agent view (Claude Code / Codex) — checklist of
+    /// recent tool calls plus the latest assistant text.
+    case agent
 }
 
 enum NotesLayoutState: Equatable {
