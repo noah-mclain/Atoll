@@ -504,6 +504,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Call pill needs ~120pt of content area; notification banner ~160
             // when the reply field is expanded. Pick the taller of the two.
             baseSize.height = max(baseSize.height, 200)
+        } else if coordinator.currentView == .agent || coordinator.currentView == .notifications {
+            // Room for the checklist / alert list to sit clear of the notch.
+            baseSize.height = max(baseSize.height, 240)
         }
         
         let adjustedContentSize = statsAdjustedNotchSize(

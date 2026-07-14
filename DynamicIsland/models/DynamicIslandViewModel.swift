@@ -372,6 +372,13 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
             return adjustedSize
         }
 
+        // The agent panel and notification scrollback carry a checklist / list
+        // that needs room to drop clear of the physical notch.
+        if coordinator.currentView == .agent || coordinator.currentView == .notifications {
+            adjustedSize.height = max(adjustedSize.height, 240)
+            return adjustedSize
+        }
+
         return statsAdjustedNotchSize(
             from: adjustedSize,
             isStatsTabActive: coordinator.currentView == .stats,
