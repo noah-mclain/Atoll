@@ -154,24 +154,58 @@ final class MusicQueueManager: ObservableObject {
     // MARK: - AppleScript queue fetch
 
     private static func fetchUpNext() async -> [QueueTrack] {
+        // Music.app doesn't expose its true Up Next to AppleScript, so we
+        // derive it from the playing container: prefer the current playlist,
+        // and fall back to the current track's album (covers single tracks
+        // played outside a playlist, which have no `current playlist`). Any
+        // AppleScript failure is surfaced as "ERR:<reason>" for the log
+        // rather than silently swallowed.
         let script = """
         tell application "Music"
-            if player state is stopped then return ""
+            if player state is stopped then return "ERR:stopped"
+            set curTrack to missing value
+            try
+                set curTrack to current track
+            on error
+                return "ERR:no current track"
+            end try
+            set curName to name of curTrack
+            set curAlbum to album of curTrack
+
+            -- Preferred source: the current playlist context.
             try
                 set cp to current playlist
                 set curIdx to index of current track
                 set totalCount to count of tracks of cp
-                if curIdx ≥ totalCount then return ""
-                set maxIdx to curIdx + \(fetchLimit)
-                if maxIdx > totalCount then set maxIdx to totalCount
+                if curIdx < totalCount then
+                    set maxIdx to curIdx + \(fetchLimit)
+                    if maxIdx > totalCount then set maxIdx to totalCount
+                    set out to ""
+                    repeat with i from (curIdx + 1) to maxIdx
+                        set t to track i of cp
+                        set out to out & i & "\(fieldSeparator)" & (name of t) & "\(fieldSeparator)" & (artist of t) & "\(fieldSeparator)" & (album of t) & "\(fieldSeparator)" & (database ID of t) & linefeed
+                    end repeat
+                    if out is not "" then return out
+                end if
+            end try
+
+            -- Fallback: remaining tracks of the current album, in order.
+            try
+                set albumTracks to (every track of playlist "Library" whose album is curAlbum)
                 set out to ""
-                repeat with i from (curIdx + 1) to maxIdx
-                    set t to track i of cp
-                    set out to out & i & "\(fieldSeparator)" & (name of t) & "\(fieldSeparator)" & (artist of t) & "\(fieldSeparator)" & (album of t) & "\(fieldSeparator)" & (database ID of t) & linefeed
+                set past to false
+                set added to 0
+                repeat with t in albumTracks
+                    if past and added < \(fetchLimit) then
+                        set out to out & (index of t) & "\(fieldSeparator)" & (name of t) & "\(fieldSeparator)" & (artist of t) & "\(fieldSeparator)" & (album of t) & "\(fieldSeparator)" & (database ID of t) & linefeed
+                        set added to added + 1
+                    end if
+                    if (name of t) is curName then set past to true
                 end repeat
-                return out
-            on error
-                return ""
+                if out is not "" then return out
+                return "ERR:no upcoming tracks in album"
+            on error errMsg
+                return "ERR:" & errMsg
             end try
         end tell
         """
@@ -180,7 +214,19 @@ final class MusicQueueManager: ObservableObject {
             let descriptor = try? await AppleScriptHelper.execute(script),
             let raw = descriptor.stringValue,
             !raw.isEmpty
-        else { return [] }
+        else {
+            #if DEBUG
+            print("[AtollQueue] AppleScript returned no result")
+            #endif
+            return []
+        }
+
+        if raw.hasPrefix("ERR:") {
+            #if DEBUG
+            print("[AtollQueue] \(raw)")
+            #endif
+            return []
+        }
 
         return raw
             .split(separator: "\n")

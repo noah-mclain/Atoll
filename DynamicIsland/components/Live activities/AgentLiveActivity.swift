@@ -11,11 +11,11 @@
 import SwiftUI
 
 /// Closed-notch live activity for running AI coding agents (Claude Code,
-/// Codex CLI). Shows a pulsing icon while an agent is working, and the
-/// project name (or agent count) plus the current tool on the right.
+/// Codex CLI). It only appears while an agent is actively working, waiting on
+/// a choice, or freshly finished — an idle session doesn't linger.
 ///
 /// Layout mirrors the other inline live activities:
-///   [agent icon] ─── [ notch ] ─── [project · tool]
+///   [agent icon] ─── [ notch ] ─── [status · tool]
 struct AgentLiveActivity: View {
     @EnvironmentObject var vm: DynamicIslandViewModel
     @ObservedObject private var monitor = AgentActivityMonitor.shared
@@ -23,35 +23,43 @@ struct AgentLiveActivity: View {
 
     @State private var pulse = false
 
+    /// Prefer the most actionable session: working, then waiting, then done.
     private var primary: AgentSession? {
-        monitor.workingSessions.first ?? monitor.sessions.first
+        let live = monitor.liveSessions
+        return live.first(where: { $0.state == .working })
+            ?? live.first(where: { $0.state == .waitingForInput })
+            ?? live.first
     }
 
-    private var isWorking: Bool {
-        !monitor.workingSessions.isEmpty
-    }
+    private var isWorking: Bool { primary?.state == .working }
 
     private var accent: Color {
-        primary?.kind.accent ?? .orange
+        guard let primary else { return .gray }
+        switch primary.state {
+        case .working:        return primary.kind.accent
+        case .waitingForInput: return .yellow
+        case .done:           return .green
+        }
     }
 
     private var rightLabel: String {
         let working = monitor.workingSessions
-        if working.count > 1 {
-            return "\(working.count) agents"
-        }
+        if working.count > 1 { return "\(working.count) agents" }
         guard let session = primary else { return "" }
-        if let tool = session.currentTool, !tool.isEmpty {
-            return tool
+        switch session.state {
+        case .working:
+            if let tool = session.currentTool, !tool.isEmpty { return tool }
+            return session.projectName
+        case .waitingForInput: return "Your input"
+        case .done:            return "Finished"
         }
-        return session.state == .working ? session.projectName : "Waiting"
     }
 
     var body: some View {
         HStack(spacing: 0) {
             Image(systemName: primary?.kind.iconName ?? "sparkle")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isWorking ? accent : Color.gray)
+                .foregroundStyle(accent)
                 .opacity(isWorking && pulse ? 0.4 : 1.0)
                 .frame(width: 24, alignment: .leading)
                 .onAppear { startPulsing() }
@@ -63,7 +71,7 @@ struct AgentLiveActivity: View {
 
             Text(rightLabel)
                 .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(isWorking ? accent : Color.gray)
+                .foregroundStyle(accent)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .contentTransition(.opacity)
@@ -72,8 +80,14 @@ struct AgentLiveActivity: View {
         }
         .frame(height: vm.effectiveClosedNotchHeight, alignment: .center)
         .onTapGesture {
-            coordinator.currentView = .agent
-            AppDelegate.shared?.vm.open()
+            // Waiting on a choice → jump straight to the terminal to answer;
+            // otherwise open the expanded agent panel.
+            if primary?.state == .waitingForInput {
+                AgentActivityMonitor.focusAgentTerminal()
+            } else {
+                coordinator.currentView = .agent
+                AppDelegate.shared?.vm.open()
+            }
         }
     }
 

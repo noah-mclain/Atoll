@@ -231,7 +231,6 @@ struct AlbumArtView: View {
                     appIconOverlay
                 }
                 .albumArtFlip(angle: musicManager.flipAngle)
-                .parallax3D()
                 .padding(.bottom, -5)
 
             }

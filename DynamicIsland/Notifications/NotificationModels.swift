@@ -145,4 +145,15 @@ struct AtollNotification: Identifiable, Equatable {
     static func == (lhs: AtollNotification, rhs: AtollNotification) -> Bool {
         lhs.id == rhs.id
     }
+
+    /// The originating app's real icon, resolved from the bundle ID when we
+    /// have one (covers unrecognized apps too), falling back to the source's
+    /// symbol.
+    var appIconImage: NSImage? {
+        if !bundleID.isEmpty,
+           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return source.icon
+    }
 }

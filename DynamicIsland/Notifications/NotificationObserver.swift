@@ -47,8 +47,12 @@ final class NotificationObserver: NSObject, ObservableObject {
     /// scrollback so a banner that auto-hides can still be reviewed and
     /// replied to. In-memory for the session.
     @Published private(set) var history: [AtollNotification] = []
+    /// A notification shown as a quiet closed-notch peek (not expanded),
+    /// per the expand-behavior setting. Cleared after a short window.
+    @Published private(set) var peekNotification: AtollNotification?
 
     private static let historyLimit = 60
+    private var peekTimer: Timer?
 
     /// The process names we'll try to attach to. Order matters only for
     /// logging; we install on all that resolve.
@@ -365,15 +369,37 @@ final class NotificationObserver: NSObject, ObservableObject {
 
         SoundPlayer.shared.playNotificationSound(for: notification.source)
 
-        pendingNotifications.append(notification)
+        // Always record it (CallMonitor keys off latestNotification, and the
+        // Alerts scrollback keeps everything).
         latestNotification = notification
         history.insert(notification, at: 0)
         if history.count > Self.historyLimit {
             history.removeLast(history.count - Self.historyLimit)
         }
-        Self.enterCommunicationMode()
 
-        scheduleAutoDismiss(for: notification)
+        if NotificationSettings.shared.shouldExpand(for: notification.source) {
+            peekNotification = nil
+            pendingNotifications.append(notification)
+            Self.enterCommunicationMode()
+            scheduleAutoDismiss(for: notification)
+        } else {
+            // Quiet peek: don't open the notch, just flash a closed-notch pill.
+            showPeek(notification)
+            scheduleAutoDismiss(for: notification)
+        }
+    }
+
+    private func showPeek(_ notification: AtollNotification) {
+        peekNotification = notification
+        peekTimer?.invalidate()
+        let duration = NotificationSettings.shared.displayDuration(for: notification.source)
+        peekTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                if self?.peekNotification?.id == notification.id {
+                    self?.peekNotification = nil
+                }
+            }
+        }
     }
 
     private func scheduleAutoDismiss(for notification: AtollNotification) {

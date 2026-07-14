@@ -62,28 +62,32 @@ struct NotificationBannerView: View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 3)
                 .fill(Color(notification.source.accentColor))
-                .frame(width: 3, height: 36)
+                .frame(width: 3, height: 40)
 
-            avatar
+            appIcon
+                .frame(width: 30, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(notification.senderName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
 
+                    Text(notification.appName)
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+
                     if let subtitle = notification.subtitle, !subtitle.isEmpty {
                         Text("· \(subtitle)")
                             .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(.white.opacity(0.4))
                             .lineLimit(1)
                     }
 
-                    Spacer()
-
-                    appIcon
-                        .frame(width: 16, height: 16)
+                    Spacer(minLength: 0)
                 }
 
                 if notification.isVoiceMessage {
@@ -91,8 +95,9 @@ struct NotificationBannerView: View {
                 } else {
                     Text(notification.body)
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.8))
-                        .lineLimit(2)
+                        .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
                 }
             }
         }
@@ -136,26 +141,6 @@ struct NotificationBannerView: View {
         }
     }
 
-    private var avatar: some View {
-        Group {
-            if let image = notification.senderAvatarImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 36, height: 36)
-                    .clipShape(Circle())
-            } else {
-                ZStack {
-                    Circle()
-                        .fill(Color(notification.source.accentColor).opacity(0.3))
-                    Text(String(notification.senderName.prefix(1)).uppercased())
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(notification.source.accentColor))
-                }
-                .frame(width: 36, height: 36)
-            }
-        }
-    }
 
     private var appIcon: some View {
         Group {

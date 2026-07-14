@@ -999,6 +999,9 @@ struct ContentView: View {
                       } else if !isCurrentScreenExpansionVisible && vm.notchState == .closed && Defaults[.enableAgentLiveActivity] && agentMonitor.hasActivity && !vm.hideOnClosed && !lockScreenManager.isLocked {
                           AgentLiveActivity()
                               .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
+                      } else if !isCurrentScreenExpansionVisible && vm.notchState == .closed, let peek = notificationObserver.peekNotification, !vm.hideOnClosed && !lockScreenManager.isLocked {
+                          NotificationLiveActivity(notification: peek)
+                              .transition(.blurReplace.animation(.interactiveSpring(dampingFraction: 1.2)))
                       } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .doNotDisturb) && vm.notchState == .closed && Defaults[.enableDoNotDisturbDetection] && Defaults[.showDoNotDisturbIndicator] && (doNotDisturbManager.isDoNotDisturbActive || doNotDisturbManager.isFocusToastDismissing) && !vm.hideOnClosed && !lockScreenManager.isLocked {
                           DoNotDisturbLiveActivity()
                     } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .lockScreen) && vm.notchState == .closed && (lockScreenManager.isLocked || !lockScreenManager.isLockIdle) && Defaults[.enableLockScreenLiveActivity] && !vm.hideOnClosed {

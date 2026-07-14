@@ -19,6 +19,8 @@ struct NotificationSettingsView: View {
     @Default(.watchAllAppsForNotifications) private var watchAllApps
     @Default(.notificationDisplayDurations) private var displayDurations
     @Default(.notificationVolume) private var notificationVolume
+    @Default(.notificationExpandBehavior) private var expandBehavior
+    @Default(.notificationExpandApps) private var expandApps
     @ObservedObject private var permissionStore = AccessibilityPermissionStore.shared
 
     private var watchedApps: [NotificationAppSource] {
@@ -53,6 +55,32 @@ struct NotificationSettingsView: View {
                         }
                     }
                 }
+            }
+
+            Section {
+                Picker("Expand the notch", selection: $expandBehavior) {
+                    ForEach(NotificationExpandBehavior.allCases) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+                if expandBehavior == .selected {
+                    ForEach(watchedApps, id: \.rawValue) { source in
+                        Toggle(isOn: Binding(
+                            get: { expandApps.contains(source.rawValue) },
+                            set: { on in
+                                var set = expandApps
+                                if on { set.insert(source.rawValue) } else { set.remove(source.rawValue) }
+                                expandApps = set
+                            }
+                        )) {
+                            Text(source.displayName)
+                        }
+                    }
+                }
+            } header: {
+                Text("Interruptions")
+            } footer: {
+                Text("“All” opens the notch for every notification. “Selected apps only” expands for the apps you choose and quietly peeks the rest. “Never” always peeks like the music activity. Incoming calls always expand.")
             }
 
             Section("Messaging apps") {

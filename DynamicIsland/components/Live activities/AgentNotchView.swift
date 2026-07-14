@@ -41,6 +41,8 @@ struct AgentNotchView: View {
         let index = min(selection, sessions.count - 1)
         let session = sessions[index]
         return VStack(spacing: 6) {
+            header(for: session)
+
             HStack(alignment: .top, spacing: 14) {
                 checklistColumn(for: session)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -58,28 +60,52 @@ struct AgentNotchView: View {
         }
     }
 
-    // MARK: - Left column
+    // MARK: - Header
 
-    private func checklistColumn(for session: AgentSession) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: session.kind.iconName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(session.kind.accent)
-                Text(session.kind.rawValue)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("•")
-                    .foregroundStyle(session.kind.accent)
-                Text(session.statusLabel)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(session.kind.accent)
+    private func header(for session: AgentSession) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: session.kind.iconName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(session.kind.accent)
+                .symbolEffect(.pulse, isActive: session.state == .working)
+            Text(session.kind.rawValue)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+            Text("•")
+                .foregroundStyle(session.kind.accent)
+            Text(session.statusLabel)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(session.kind.accent)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if session.projectName != session.kind.rawValue {
+                Text(session.projectName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
                     .lineLimit(1)
             }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(session.toolCalls) { call in
-                    checklistRow(call: call, accent: session.kind.accent)
+    // MARK: - Left column (scrollable checklist)
+
+    private func checklistColumn(for session: AgentSession) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(session.toolCalls) { call in
+                        checklistRow(call: call, accent: session.kind.accent)
+                            .id(call.id)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: session.currentTool) { _, _ in
+                // Keep the in-flight step in view as the agent advances.
+                if let current = session.toolCalls.last(where: { !$0.isComplete }) ?? session.toolCalls.last {
+                    withAnimation(.smooth(duration: 0.25)) {
+                        proxy.scrollTo(current.id, anchor: .bottom)
+                    }
                 }
             }
         }
@@ -96,22 +122,25 @@ struct AgentNotchView: View {
                 .foregroundStyle(call.isComplete ? Color.white.opacity(0.7) : .white)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            Spacer(minLength: 0)
         }
     }
 
     // MARK: - Right column
 
     private func detailBubble(text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.white)
-            .multilineTextAlignment(.leading)
-            .lineLimit(6)
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.10))
-            )
+        ScrollView(showsIndicators: false) {
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.10))
+        )
     }
 
     private func pageDots(count: Int, active: Int) -> some View {

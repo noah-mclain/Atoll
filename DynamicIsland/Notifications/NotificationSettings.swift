@@ -11,6 +11,24 @@
 import Defaults
 import Foundation
 
+/// How arriving notifications interrupt: fully open the notch, only for a
+/// chosen set of apps (others peek), or never open (always a quiet peek).
+enum NotificationExpandBehavior: String, Defaults.Serializable, CaseIterable, Identifiable {
+    case all
+    case selected
+    case peekOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all:      return "All notifications"
+        case .selected: return "Selected apps only"
+        case .peekOnly: return "Never (peek only)"
+        }
+    }
+}
+
 extension Defaults.Keys {
     // MARK: Notifications
     static let enabledNotificationApps = Key<Set<String>>(
@@ -20,6 +38,16 @@ extension Defaults.Keys {
             .map { $0.rawValue })
     )
     static let watchAllAppsForNotifications = Key<Bool>("watchAllAppsForNotifications", default: false)
+    /// Whether a notification opens the notch, or just peeks like the music
+    /// live activity.
+    static let notificationExpandBehavior = Key<NotificationExpandBehavior>(
+        "notificationExpandBehavior", default: .all
+    )
+    /// Apps whose notifications open the notch when the behavior is `.selected`.
+    static let notificationExpandApps = Key<Set<String>>(
+        "notificationExpandApps",
+        default: Set([NotificationAppSource.whatsApp, .discord, .iMessage, .facetime].map { $0.rawValue })
+    )
     static let notificationDisplayDurations = Key<[String: Double]>(
         "notificationDisplayDurations",
         default: [:]
@@ -68,6 +96,31 @@ final class NotificationSettings: ObservableObject {
         var set = Defaults[.enabledNotificationApps]
         if enabled { set.insert(source.rawValue) } else { set.remove(source.rawValue) }
         Defaults[.enabledNotificationApps] = set
+    }
+
+    var expandBehavior: NotificationExpandBehavior {
+        get { Defaults[.notificationExpandBehavior] }
+        set { Defaults[.notificationExpandBehavior] = newValue }
+    }
+
+    /// Whether an arriving notification from `source` should open the notch
+    /// (vs. peeking quietly like the music live activity).
+    func shouldExpand(for source: NotificationAppSource) -> Bool {
+        switch Defaults[.notificationExpandBehavior] {
+        case .all:      return true
+        case .peekOnly: return false
+        case .selected: return Defaults[.notificationExpandApps].contains(source.rawValue)
+        }
+    }
+
+    func expandsNotch(for source: NotificationAppSource) -> Bool {
+        Defaults[.notificationExpandApps].contains(source.rawValue)
+    }
+
+    func setExpandsNotch(_ expands: Bool, for source: NotificationAppSource) {
+        var set = Defaults[.notificationExpandApps]
+        if expands { set.insert(source.rawValue) } else { set.remove(source.rawValue) }
+        Defaults[.notificationExpandApps] = set
     }
 
     func displayDuration(for source: NotificationAppSource) -> Double {

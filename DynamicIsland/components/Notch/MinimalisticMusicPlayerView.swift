@@ -1337,7 +1337,6 @@ struct MinimalisticAlbumArtView: View {
                     .clipped()
                     .matchedGeometryEffect(id: "albumArt", in: albumArtNamespace)
                     .albumArtFlip(angle: musicManager.flipAngle)
-                    .parallax3D()
         }
         .buttonStyle(PlainButtonStyle())
         .opacity(musicManager.isPlaying ? 1 : 0.4)

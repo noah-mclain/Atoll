@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -44,8 +45,11 @@ struct AgentSession: Identifiable, Equatable {
         /// Log file written to within the working threshold — the agent is
         /// actively generating or running tools.
         case working
-        /// Session exists but has gone quiet — likely waiting for the user.
-        case waiting
+        /// The agent's last turn ends on a question or an AskUserQuestion
+        /// prompt — it genuinely wants the user to choose something.
+        case waitingForInput
+        /// The agent finished its turn and is idle (not asking anything).
+        case done
     }
 
     let id: String              // absolute path of the session log
@@ -61,11 +65,13 @@ struct AgentSession: Identifiable, Equatable {
     /// Human-friendly session summary, if the transcript carries one.
     var title: String?
 
-    /// Header status line, e.g. "Thinking", "Working on your task".
+    /// Header status line, e.g. "Thinking", "Needs your input".
     var statusLabel: String {
         switch state {
-        case .waiting:
-            return "Waiting for your input"
+        case .waitingForInput:
+            return "Needs your input"
+        case .done:
+            return "Finished"
         case .working:
             switch kind {
             case .claudeCode: return "Thinking"
@@ -101,15 +107,37 @@ final class AgentActivityMonitor: ObservableObject {
     @Published private(set) var sessions: [AgentSession] = []
 
     var workingSessions: [AgentSession] { sessions.filter { $0.state == .working } }
-    var hasActivity: Bool { !sessions.isEmpty }
+
+    /// Sessions worth surfacing in the closed notch: actively working, waiting
+    /// on the user, or freshly finished (within the done grace window). An
+    /// idle-finished session drops out so the pill doesn't linger for minutes.
+    var liveSessions: [AgentSession] {
+        sessions.filter { session in
+            switch session.state {
+            case .working, .waitingForInput:
+                return true
+            case .done:
+                guard let since = doneSince[session.id] else { return false }
+                return Date().timeIntervalSince(since) < Self.doneGrace
+            }
+        }
+    }
+
+    var hasActivity: Bool { !liveSessions.isEmpty }
 
     private static let workingThreshold: TimeInterval = 20
     private static let sessionTimeout: TimeInterval = 15 * 60
     private static let pollInterval: TimeInterval = 2
+    /// How long a finished session keeps showing its "Finished" pill.
+    private static let doneGrace: TimeInterval = 12
 
     private var pollTimer: Timer?
     private var lastKnownSizes: [String: UInt64] = [:]
     private var lastKnownParses: [String: ParsedTranscript] = [:]
+    /// When each session first entered the `.done` state, for the grace window.
+    private var doneSince: [String: Date] = [:]
+    /// Live-session IDs at the last publish, so grace-window expiry re-renders.
+    private var lastLiveIDs: Set<String> = []
 
     /// The slice of a transcript we surface in the UI.
     private struct ParsedTranscript: Equatable {
@@ -117,10 +145,11 @@ final class AgentActivityMonitor: ObservableObject {
         var latestText: String?
         var title: String?
         var currentTool: String?
+        var awaitingChoice: Bool = false
     }
 
     /// How many trailing tool calls to keep for the checklist.
-    private static let checklistDepth = 5
+    private static let checklistDepth = 40
 
     private init() {
         start()
@@ -142,6 +171,30 @@ final class AgentActivityMonitor: ObservableObject {
         sessions = []
     }
 
+    /// Brings the most likely terminal running a coding agent to the front so
+    /// the user can answer a prompt. Best-effort: activates the first running
+    /// app from a list of common terminal emulators / editors.
+    static func focusAgentTerminal() {
+        let candidates = [
+            "com.googlecode.iterm2",
+            "com.apple.Terminal",
+            "com.mitchellh.ghostty",
+            "dev.warp.Warp-Stable",
+            "com.github.wez.wezterm",
+            "net.kovidgoyal.kitty",
+            "org.alacritty",
+            "com.microsoft.VSCode",
+            "com.todesktop.230313mzl4w4u92", // Cursor
+        ]
+        for bundleID in candidates {
+            if let app = NSWorkspace.shared.runningApplications
+                .first(where: { $0.bundleIdentifier == bundleID }) {
+                app.activate(options: [.activateAllWindows])
+                return
+            }
+        }
+    }
+
     // MARK: - Polling
 
     private func poll() {
@@ -160,8 +213,40 @@ final class AgentActivityMonitor: ObservableObject {
         }
 
         let updated = byProject.values.sorted { $0.lastActivity > $1.lastActivity }
-        if updated != sessions {
+
+        // Track when each session first went `.done` (for the grace window),
+        // and forget sessions that changed state or disappeared.
+        let now = Date()
+        let presentIDs = Set(updated.map(\.id))
+        for session in updated where session.state == .done && doneSince[session.id] == nil {
+            doneSince[session.id] = now
+        }
+        for session in updated where session.state != .done {
+            doneSince.removeValue(forKey: session.id)
+        }
+        doneSince = doneSince.filter { presentIDs.contains($0.key) }
+
+        // Publish when the sessions themselves change, or when the set of
+        // "live" (shown in the closed notch) sessions changes — including a
+        // finished pill ageing out of its grace window.
+        let liveIDs = Set(liveIDs(from: updated))
+        if updated != sessions || liveIDs != lastLiveIDs {
             sessions = updated
+            lastLiveIDs = liveIDs
+        }
+    }
+
+    /// IDs of sessions that should show in the closed notch, computed from a
+    /// candidate list (so it works before `sessions` is assigned).
+    private func liveIDs(from candidates: [AgentSession]) -> [String] {
+        candidates.compactMap { session in
+            switch session.state {
+            case .working, .waitingForInput:
+                return session.id
+            case .done:
+                guard let since = doneSince[session.id] else { return nil }
+                return Date().timeIntervalSince(since) < Self.doneGrace ? session.id : nil
+            }
         }
     }
 
@@ -234,8 +319,6 @@ final class AgentActivityMonitor: ObservableObject {
             return nil
         }
 
-        let state: AgentSession.ActivityState = age < Self.workingThreshold ? .working : .waiting
-
         // Re-parse only when the file actually grew — parsing is the only
         // expensive step, so cache the last result per path.
         var parsed = lastKnownParses[logURL.path] ?? ParsedTranscript()
@@ -244,6 +327,18 @@ final class AgentActivityMonitor: ObservableObject {
             lastKnownSizes[logURL.path] = size
             parsed = Self.parseTranscript(in: logURL, kind: kind)
             lastKnownParses[logURL.path] = parsed
+        }
+
+        // Recently written → working. Otherwise it's the user's move: only
+        // "waiting for input" when the agent actually posed a question or an
+        // AskUserQuestion prompt; a plain finished turn is "done".
+        let state: AgentSession.ActivityState
+        if age < Self.workingThreshold {
+            state = .working
+        } else if parsed.awaitingChoice {
+            state = .waitingForInput
+        } else {
+            state = .done
         }
 
         // While the agent is working, the last tool call is still in flight;
@@ -286,6 +381,11 @@ final class AgentActivityMonitor: ObservableObject {
         var latestText: String?
         var title: String?
         var syntheticIndex = 0
+        // The final assistant action, used to tell "waiting for a choice" from
+        // "just finished": .askQuestion carries the AskUserQuestion tool id,
+        // .text carries whether that text ends on a question.
+        enum LastAction { case none, askQuestion(String), text(Bool), toolOther, toolResult }
+        var lastAction: LastAction = .none
 
         // Chronological pass so ordering and completion resolve naturally.
         for line in text.split(separator: "\n") {
@@ -306,12 +406,16 @@ final class AgentActivityMonitor: ObservableObject {
                     case "tool_use":
                         let id = block["id"] as? String ?? "auto-\(syntheticIndex)"
                         syntheticIndex += 1
-                        ordered.append((id, friendlyLabel(tool: block["name"] as? String ?? "", input: block["input"] as? [String: Any])))
+                        let name = block["name"] as? String ?? ""
+                        ordered.append((id, friendlyLabel(tool: name, input: block["input"] as? [String: Any])))
+                        lastAction = (name == "AskUserQuestion") ? .askQuestion(id) : .toolOther
                     case "tool_result":
                         if let id = block["tool_use_id"] as? String { resultIDs.insert(id) }
+                        lastAction = .toolResult
                     case "text":
                         if let t = (block["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
                             latestText = t
+                            lastAction = .text(t.hasSuffix("?"))
                         }
                     default:
                         break
@@ -324,15 +428,18 @@ final class AgentActivityMonitor: ObservableObject {
             switch object["type"] as? String {
             case let type? where type.contains("function_call_output"):
                 if let id = object["call_id"] as? String { resultIDs.insert(id) }
+                lastAction = .toolResult
             case let type? where type.contains("function_call"):
                 let id = object["call_id"] as? String ?? "auto-\(syntheticIndex)"
                 syntheticIndex += 1
                 ordered.append((id, friendlyLabel(tool: object["name"] as? String ?? "", input: object["arguments"] as? [String: Any])))
+                lastAction = .toolOther
             case "message":
                 if let content = object["content"] as? [[String: Any]] {
                     for block in content where (block["type"] as? String)?.contains("text") == true {
                         if let t = (block["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
                             latestText = t
+                            lastAction = .text(t.hasSuffix("?"))
                         }
                     }
                 }
@@ -346,11 +453,21 @@ final class AgentActivityMonitor: ObservableObject {
         }
         let currentTool = recent.last(where: { !$0.isComplete })?.label ?? recent.last?.label
 
+        // The agent genuinely wants input only when its last move was an
+        // unanswered AskUserQuestion or a message ending in a question.
+        let awaitingChoice: Bool
+        switch lastAction {
+        case .askQuestion(let id): awaitingChoice = !resultIDs.contains(id)
+        case .text(let endsWithQuestion): awaitingChoice = endsWithQuestion
+        default: awaitingChoice = false
+        }
+
         return ParsedTranscript(
             toolCalls: recent,
             latestText: latestText.map(truncateForBubble),
             title: title,
-            currentTool: currentTool
+            currentTool: currentTool,
+            awaitingChoice: awaitingChoice
         )
     }
 
