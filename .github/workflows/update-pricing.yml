@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   update-pricing:
+    # Needs the APP_ID / APP_PRIVATE_KEY secrets, which only exist on the
+    # canonical repository — skip on forks instead of failing every night.
+    if: github.repository == 'Ebullioscopic/Atoll'
     runs-on: ubuntu-latest
 
     steps:

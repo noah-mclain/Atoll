@@ -14,6 +14,9 @@ permissions:
 
 jobs:
   mirror:
+    # Mirroring needs the ORG_REPO_TOKEN secret, which only exists on the
+    # canonical repository — skip on forks instead of failing every push.
+    if: github.repository == 'Ebullioscopic/Atoll'
     runs-on: ubuntu-latest
 
     steps:
