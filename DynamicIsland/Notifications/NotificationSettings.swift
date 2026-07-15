@@ -37,7 +37,7 @@ extension Defaults.Keys {
             .filter { $0 != .generic }
             .map { $0.rawValue })
     )
-    static let watchAllAppsForNotifications = Key<Bool>("watchAllAppsForNotifications", default: false)
+    static let watchAllAppsForNotifications = Key<Bool>("watchAllAppsForNotifications", default: true)
     /// Whether a notification opens the notch, or just peeks like the music
     /// live activity.
     static let notificationExpandBehavior = Key<NotificationExpandBehavior>(

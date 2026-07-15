@@ -45,8 +45,8 @@ struct AgentSession: Identifiable, Equatable {
         /// Log file written to within the working threshold — the agent is
         /// actively generating or running tools.
         case working
-        /// The agent's last turn ends on a question or an AskUserQuestion
-        /// prompt — it genuinely wants the user to choose something.
+        /// The agent's last turn is an unanswered AskUserQuestion — it
+        /// explicitly offered options and is waiting on the user's pick.
         case waitingForInput
         /// The agent finished its turn and is idle (not asking anything).
         case done
@@ -382,9 +382,9 @@ final class AgentActivityMonitor: ObservableObject {
         var title: String?
         var syntheticIndex = 0
         // The final assistant action, used to tell "waiting for a choice" from
-        // "just finished": .askQuestion carries the AskUserQuestion tool id,
-        // .text carries whether that text ends on a question.
-        enum LastAction { case none, askQuestion(String), text(Bool), toolOther, toolResult }
+        // "just finished": .askQuestion carries the AskUserQuestion tool id
+        // so it can be checked against resultIDs below.
+        enum LastAction { case none, askQuestion(String), text, toolOther, toolResult }
         var lastAction: LastAction = .none
 
         // Chronological pass so ordering and completion resolve naturally.
@@ -415,7 +415,7 @@ final class AgentActivityMonitor: ObservableObject {
                     case "text":
                         if let t = (block["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
                             latestText = t
-                            lastAction = .text(t.hasSuffix("?"))
+                            lastAction = .text
                         }
                     default:
                         break
@@ -439,7 +439,7 @@ final class AgentActivityMonitor: ObservableObject {
                     for block in content where (block["type"] as? String)?.contains("text") == true {
                         if let t = (block["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
                             latestText = t
-                            lastAction = .text(t.hasSuffix("?"))
+                            lastAction = .text
                         }
                     }
                 }
@@ -453,12 +453,13 @@ final class AgentActivityMonitor: ObservableObject {
         }
         let currentTool = recent.last(where: { !$0.isComplete })?.label ?? recent.last?.label
 
-        // The agent genuinely wants input only when its last move was an
-        // unanswered AskUserQuestion or a message ending in a question.
+        // The agent genuinely wants input only when it explicitly presented
+        // options — an unanswered AskUserQuestion. A turn that merely ends on a
+        // question mark ("Want me to continue?") is just a finished turn, not a
+        // blocking choice, so it must read as `done`, not "Needs your input".
         let awaitingChoice: Bool
         switch lastAction {
         case .askQuestion(let id): awaitingChoice = !resultIDs.contains(id)
-        case .text(let endsWithQuestion): awaitingChoice = endsWithQuestion
         default: awaitingChoice = false
         }
 

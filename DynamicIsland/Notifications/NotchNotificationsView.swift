@@ -152,6 +152,25 @@ private struct NotificationHistoryRow: View {
         }
         .frame(width: 32, height: 32)
         .clipShape(Circle())
+        // Badge with the originating app's real icon (WhatsApp, Discord,
+        // Messages, …) so the source is obvious at a glance.
+        .overlay(alignment: .bottomTrailing) { appIconBadge }
+    }
+
+    @ViewBuilder
+    private var appIconBadge: some View {
+        if let icon = notification.appIconImage {
+            Image(nsImage: icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 15, height: 15)
+                .background(
+                    Circle()
+                        .fill(.black)
+                        .frame(width: 17, height: 17)
+                )
+                .offset(x: 3, y: 3)
+        }
     }
 
     private func send() {

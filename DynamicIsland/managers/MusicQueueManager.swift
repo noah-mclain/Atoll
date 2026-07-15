@@ -50,6 +50,10 @@ final class MusicQueueManager: ObservableObject {
 
     private var artworkCache: [Int: NSImage] = [:]
     private var refreshTimer: Timer?
+    /// Chains artwork fetches so only one AppleScript request runs at a
+    /// time — the fallback path can scan the whole Library, and up to 10
+    /// rows requesting concurrently would fire that many scans at once.
+    private var artworkFetchTail: Task<Void, Never>?
 
     private init() {}
 
@@ -125,11 +129,39 @@ final class MusicQueueManager: ObservableObject {
     func artwork(for track: QueueTrack) async -> NSImage? {
         if let cached = artworkCache[track.id] { return cached }
 
+        // Chain onto the previous fetch so at most one AppleScript artwork
+        // request is in flight — the Library fallback below can scan the
+        // whole library, and firing that concurrently for every visible row
+        // would be wasteful.
+        let previousTail = artworkFetchTail
+        let fetch = Task<NSImage?, Never> { [weak self] in
+            await previousTail?.value
+            guard let self else { return nil }
+            return await self.fetchArtworkFromMusicApp(for: track)
+        }
+        artworkFetchTail = Task { _ = await fetch.value }
+        return await fetch.value
+    }
+
+    private func fetchArtworkFromMusicApp(for track: QueueTrack) async -> NSImage? {
+        // Re-check the cache: the fetch we just waited on may have already
+        // populated this track's artwork.
+        if let cached = artworkCache[track.id] { return cached }
+
+        // Match the now-playing fetch: `raw data` yields decodable image
+        // bytes, whereas `data` returns a typed descriptor NSImage can't parse.
+        // Look the track up by database ID in the current playlist first, then
+        // fall back to the Library (covers album-derived queue entries that
+        // have no current-playlist context).
         let script = """
         tell application "Music"
             try
-                set t to (first track of current playlist whose database ID is \(track.id))
-                return data of artwork 1 of t
+                try
+                    set t to (first track of current playlist whose database ID is \(track.id))
+                on error
+                    set t to (first track of playlist "Library" whose database ID is \(track.id))
+                end try
+                return raw data of artwork 1 of t
             on error
                 return ""
             end try

@@ -31,7 +31,12 @@ struct AgentNotchView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        // Fill the panel and pin to the top so the header sits clear of the
+        // physical notch; overflow is absorbed by the scrolling columns below
+        // rather than pushing content up under the notch.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: sessions.count) { _, count in
             if selection >= count { selection = max(0, count - 1) }
         }

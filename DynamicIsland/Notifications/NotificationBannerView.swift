@@ -144,7 +144,7 @@ struct NotificationBannerView: View {
 
     private var appIcon: some View {
         Group {
-            if let icon = notification.source.icon {
+            if let icon = notification.appIconImage {
                 Image(nsImage: icon)
                     .resizable()
                     .scaledToFit()

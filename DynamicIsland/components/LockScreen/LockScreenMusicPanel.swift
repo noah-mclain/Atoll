@@ -50,8 +50,6 @@ struct LockScreenMusicPanel: View {
     @State private var isArtworkFullscreen = false
     
     @State private var collapseWorkItem: DispatchWorkItem?
-    @State private var parallaxResumeWorkItem: DispatchWorkItem?
-    @State private var isParallaxSuspended = false
     @State private var lastLoggedGlassSnapshot: GlassLogSnapshot?
     @Default(.lockScreenGlassStyle) var lockScreenGlassStyle
     @Default(.lockScreenGlassCustomizationMode) private var glassCustomizationMode
@@ -66,7 +64,6 @@ struct LockScreenMusicPanel: View {
     @Default(.musicSkipBehavior) private var musicSkipBehavior
     @Default(.lockScreenMusicMergedAirPlayOutput) private var mergedAirPlayOutput
     @Default(.enableLyrics) private var enableLyrics
-    @Default(.lockScreenMusicAlbumParallaxEnabled) private var lockScreenParallaxEnabled
     @Default(.lockScreenMusicPanelWidth) private var collapsedPanelWidth
     @Default(.lockScreenMusicFullscreenArtworkEnabled) private var fullscreenArtworkEnabled
     @Default(.lockScreenKeepAlbumArtVisibleDuringFullscreenArtwork) private var keepAlbumArtVisibleDuringFullscreenArtwork
@@ -191,9 +188,6 @@ struct LockScreenMusicPanel: View {
             isActive = false
             cancelCollapseTimer()
             isVolumeSliderVisible = false
-            parallaxResumeWorkItem?.cancel()
-            parallaxResumeWorkItem = nil
-            isParallaxSuspended = false
         }
         .onReceive(NotificationCenter.default.publisher(for: .atollArtworkWallpaperDismissed)) { _ in
             withAnimation(.easeInOut(duration: 0.28)) {
@@ -410,10 +404,6 @@ struct LockScreenMusicPanel: View {
             }
         }
         .albumArtFlip(angle: isArtworkFullscreen && !keepAlbumArtVisibleDuringFullscreenArtwork ? 0 : musicManager.flipAngle)
-        .parallax3D(
-            enableOverride: lockScreenParallaxEnabled && (!isArtworkFullscreen || keepAlbumArtVisibleDuringFullscreenArtwork),
-            suspended: isParallaxSuspended
-        )
         .frame(width: size)
         .background(albumArtBackground(cornerRadius: artworkCornerRadius))
         .clipShape(RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous))
@@ -445,7 +435,6 @@ struct LockScreenMusicPanel: View {
 
     private func toggleExpanded() {
         let newState = !isExpanded
-        suspendParallaxInteraction()
         withAnimation(.easeInOut(duration: 0.28)) {
             isExpanded = newState
         }
@@ -499,7 +488,6 @@ struct LockScreenMusicPanel: View {
         guard isExpanded else { return }
 
         let workItem = DispatchWorkItem {
-            suspendParallaxInteraction()
             withAnimation(.easeInOut(duration: 0.28)) {
                 isExpanded = false
             }
@@ -508,17 +496,6 @@ struct LockScreenMusicPanel: View {
 
         collapseWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + collapseTimeout, execute: workItem)
-    }
-
-    private func suspendParallaxInteraction(for duration: TimeInterval = 0.65) {
-        parallaxResumeWorkItem?.cancel()
-        isParallaxSuspended = true
-
-        let workItem = DispatchWorkItem {
-            isParallaxSuspended = false
-        }
-        parallaxResumeWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)
     }
 
     private func cancelCollapseTimer() {

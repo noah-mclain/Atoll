@@ -107,7 +107,7 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Advanced")
             } footer: {
-                Text("By default only the apps above are watched. Enable to mirror any app's notifications in the notch.")
+                Text("Notifications from all apps are mirrored in the notch by default. Disable to limit watching to the apps above.")
             }
         }
         .formStyle(.grouped)
