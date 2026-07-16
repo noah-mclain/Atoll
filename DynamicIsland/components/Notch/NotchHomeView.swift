@@ -236,8 +236,7 @@ struct AlbumArtView: View {
             }
             .buttonStyle(PlainButtonStyle())
             .scaleEffect(musicManager.isPlaying ? 1 : 0.85)
-            .liveAlbumArtPulse(isPlaying: Defaults[.liveAlbumArt] && musicManager.isPlaying)
-            
+
             albumArtDarkOverlay
         }
     }
@@ -342,34 +341,11 @@ struct MusicControlsView: View {
                 frameWidth: width
             )
             .fontWeight(.medium)
-            // Lyrics shown under the author name (same font size as author) when enabled in settings
+            // Live lyrics under the author name: the synced current line bold
+            // with its neighbors dimmed, Apple Music-style.
             if enableLyrics {
-                let transition = AnyTransition.asymmetric(
-                    insertion: .move(edge: .bottom).combined(with: .opacity),
-                    removal: .move(edge: .top).combined(with: .opacity)
-                )
-
-                let line = musicManager.currentLyrics.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if !line.isEmpty {
-                    let lyricsBinding = Binding<String>(
-                        get: { musicManager.currentLyrics },
-                        set: { _ in }
-                    )
-
-                    MarqueeText(
-                        lyricsBinding,
-                        font: .system(size: 12, weight: .regular),
-                        nsFont: .headline,
-                        textColor: .white.opacity(0.7),
-                        minDuration: 0.35,
-                        frameWidth: width
-                    )
+                LiveLyricsView(frameWidth: width)
                     .padding(.top, 2)
-                    .id(line)
-                    .transition(transition)
-                    .animation(.easeInOut(duration: 0.32), value: line)
-                }
             }
         }
     }

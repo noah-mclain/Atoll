@@ -123,6 +123,8 @@ func enforceMinimumNotchWidth() {
 }
 private let minimalisticBaseOpenNotchSize: CGSize = .init(width: 420, height: 180)
 private let minimalisticLyricsExtraHeight: CGFloat = 40
+/// Header row plus five visible queue rows; anything past five scrolls.
+let minimalisticQueueExtraHeight: CGFloat = 226
 let minimalisticTimerCountdownTopPadding: CGFloat = 12
 let minimalisticTimerCountdownContentHeight: CGFloat = 82
 let minimalisticTimerCountdownBlockHeight: CGFloat = minimalisticTimerCountdownTopPadding + minimalisticTimerCountdownContentHeight
@@ -143,7 +145,11 @@ func minimalisticOpenNotchSize(isDynamicIslandMode: Bool) -> CGSize {
     if Defaults[.enableLyrics] {
         size.height += minimalisticLyricsExtraHeight
     }
-    
+
+    if MusicQueueManager.shared.isQueueVisible {
+        size.height += minimalisticQueueExtraHeight
+    }
+
     let reminderCount = ReminderLiveActivityManager.shared.activeWindowReminders.count
     if reminderCount > 0 {
         let reminderHeight = ReminderLiveActivityManager.additionalHeight(forRowCount: reminderCount)

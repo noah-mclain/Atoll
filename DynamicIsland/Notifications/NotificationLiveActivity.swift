@@ -41,7 +41,9 @@ struct NotificationLiveActivity: View {
         .frame(height: vm.effectiveClosedNotchHeight, alignment: .center)
         .onTapGesture {
             coordinator.currentView = .notifications
-            AppDelegate.shared?.vm.open()
+            // Open this window's own view model — the delegate's bare `vm`
+            // drives nothing when the island shows on every display.
+            vm.open()
         }
     }
 

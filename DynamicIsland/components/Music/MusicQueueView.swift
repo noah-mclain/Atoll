@@ -10,6 +10,7 @@
 
 import Defaults
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Music-control slot button that swaps the calendar panel of the open
 /// notch for the Apple Music up-next queue (and back).
@@ -33,7 +34,9 @@ struct MusicQueueButton: View {
     }
 }
 
-/// Inline queue panel shown in place of the calendar in the open notch.
+/// Inline queue panel: header plus the shared reorderable track list. Used
+/// in place of the calendar in the open notch, and below the controls in the
+/// minimalistic player.
 struct MusicQueuePanel: View {
     @ObservedObject var queueManager: MusicQueueManager
 
@@ -68,68 +71,78 @@ struct MusicQueuePanel: View {
                     .padding(4)
                     .frame(maxHeight: .infinity, alignment: .top)
             } else {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 2) {
-                        ForEach(queueManager.upNext) { track in
-                            MusicQueueRow(track: track) {
-                                queueManager.play(track)
-                            }
-                        }
-                    }
-                }
+                MusicQueueList(queueManager: queueManager)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
-struct MusicQueuePopover: View {
+/// Scrollable track list with drag-to-reorder. Rows drag within the list;
+/// the drop commits the new order to Music.app (real playlists only — album
+/// playback snaps back on the next refresh).
+struct MusicQueueList: View {
     @ObservedObject var queueManager: MusicQueueManager
-    var onHoverChanged: (Bool) -> Void
-    var dismiss: () -> Void
+
+    @State private var draggingID: Int?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Up Next")
-                .font(.headline)
-                .padding(.horizontal, 4)
-
-            if queueManager.isLoading {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                        .controlSize(.small)
-                    Spacer()
-                }
-                .padding(.vertical, 16)
-            } else if queueManager.upNext.isEmpty {
-                Text("Queue unavailable — play an album or playlist in Apple Music.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .padding(4)
-            } else {
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(queueManager.upNext) { track in
-                            MusicQueueRow(track: track) {
-                                queueManager.play(track)
-                                dismiss()
-                            }
-                        }
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 2) {
+                ForEach(queueManager.upNext) { track in
+                    MusicQueueRow(track: track) {
+                        queueManager.play(track)
                     }
+                    .opacity(draggingID == track.id ? 0.35 : 1)
+                    .onDrag {
+                        draggingID = track.id
+                        return NSItemProvider(object: String(track.id) as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: QueueReorderDropDelegate(
+                        targetID: track.id,
+                        draggingID: $draggingID,
+                        queueManager: queueManager
+                    ))
                 }
-                .frame(maxHeight: 260)
             }
         }
-        .frame(width: 260)
-        .padding(12)
-        .onHover { hovering in
-            onHoverChanged(hovering)
+    }
+}
+
+/// Reorders the published list live as the drag passes over rows, then
+/// commits the final position to Music.app on drop.
+private struct QueueReorderDropDelegate: DropDelegate {
+    let targetID: Int
+    @Binding var draggingID: Int?
+    let queueManager: MusicQueueManager
+
+    func dropEntered(info: DropInfo) {
+        MainActor.assumeIsolated {
+            guard let draggingID, draggingID != targetID,
+                  let from = queueManager.upNext.firstIndex(where: { $0.id == draggingID }),
+                  let to = queueManager.upNext.firstIndex(where: { $0.id == targetID })
+            else { return }
+            withAnimation(.smooth(duration: 0.2)) {
+                queueManager.reorderLocally(
+                    fromOffsets: IndexSet(integer: from),
+                    toOffset: to > from ? to + 1 : to
+                )
+            }
         }
-        .onDisappear {
-            onHoverChanged(false)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        MainActor.assumeIsolated {
+            if let draggingID {
+                queueManager.commitMove(of: draggingID)
+            }
+            draggingID = nil
         }
+        return true
     }
 }
 

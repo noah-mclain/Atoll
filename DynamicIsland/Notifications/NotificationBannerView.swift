@@ -127,16 +127,31 @@ struct NotificationBannerView: View {
 
     private var actionBar: some View {
         HStack(spacing: 12) {
-            if notification.source.supportsQuickReply {
-                actionButton(label: "Reply", icon: "arrowshape.turn.up.left.fill") {
-                    withAnimation(.spring(response: 0.3)) { showReplyField.toggle() }
+            // Actions scroll if a permission banner brings several buttons;
+            // the close button stays pinned outside so it can't be pushed
+            // off the banner.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    if notification.source.supportsQuickReply {
+                        actionButton(label: "Reply", icon: "arrowshape.turn.up.left.fill") {
+                            withAnimation(.spring(response: 0.3)) { showReplyField.toggle() }
+                        }
+                    }
+                    // The system banner's own buttons (Allow / Don't Allow /
+                    // …), pressed through to the real notification.
+                    ForEach(notification.nativeActions) { action in
+                        actionButton(label: action.title, icon: "hand.tap.fill") {
+                            action.perform()
+                            onDismiss()
+                        }
+                    }
+                    actionButton(label: "Open", icon: "arrow.up.right.square") {
+                        openApp()
+                        onDismiss()
+                    }
                 }
             }
-            actionButton(label: "Open", icon: "arrow.up.right.square") {
-                openApp()
-                onDismiss()
-            }
-            Spacer()
+            Spacer(minLength: 8)
             actionButton(label: "", icon: "xmark") { onDismiss() }
         }
     }

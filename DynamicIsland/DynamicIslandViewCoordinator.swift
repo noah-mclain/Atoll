@@ -112,10 +112,12 @@ class DynamicIslandViewCoordinator: ObservableObject {
     
     @Published var currentView: NotchViews = .home {
         didSet {
-            // Allow .communication through even in minimalistic mode — call /
-            // notification banners are higher-priority interruptions than the
-            // tab restriction is meant to silence.
-            if Defaults[.enableMinimalisticUI] && currentView != .home && currentView != .communication {
+            // Allow interruption views through even in minimalistic mode —
+            // call / notification banners, the alerts scrollback, and agent
+            // prompts are higher-priority than the tab restriction is meant
+            // to silence. They only appear when triggered, never as tabs.
+            let interruptionViews: [NotchViews] = [.communication, .agent, .notifications]
+            if Defaults[.enableMinimalisticUI] && currentView != .home && !interruptionViews.contains(currentView) {
                 currentView = .home
                 return
             }

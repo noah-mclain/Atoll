@@ -36,6 +36,7 @@ struct MinimalisticMusicPlayerView: View {
     @ObservedObject private var reminderManager = ReminderLiveActivityManager.shared
     @ObservedObject private var timerManager = TimerManager.shared
     @ObservedObject private var coordinator = DynamicIslandViewCoordinator.shared
+    @ObservedObject private var queueManager = MusicQueueManager.shared
     @State private var hudValue: Double = 0
     @State private var hudDragging: Bool = false
     @State private var hudLastDragged: Date = .distantPast
@@ -144,6 +145,12 @@ struct MinimalisticMusicPlayerView: View {
                 if enableLyrics {
                     lyricsView
                         .padding(.top, 10)
+                }
+
+                if queueManager.isQueueVisible {
+                    MusicQueuePanel(queueManager: queueManager)
+                        .padding(.top, 10)
+                        .frame(height: minimalisticQueueExtraHeight - 10)
                 }
 
                 timerCountdownSection
@@ -263,6 +270,7 @@ struct MinimalisticMusicPlayerView: View {
         if enableLyrics { signature += 1 }
         if shouldShowTimerCountdown { signature += 100 }
         if showMinimalisticBatteryIndicator { signature += 1000 }
+        if queueManager.isQueueVisible { signature += 10000 }
         return signature
     }
 
@@ -282,6 +290,9 @@ struct MinimalisticMusicPlayerView: View {
 
             if enableLyrics {
                 height += 10 + 34 // lyrics padding + estimated height
+            }
+            if queueManager.isQueueVisible {
+                height += minimalisticQueueExtraHeight
             }
             if shouldShowTimerCountdown {
                 height += minimalisticTimerCountdownBlockHeight
@@ -304,6 +315,9 @@ struct MinimalisticMusicPlayerView: View {
 
         if enableLyrics {
             height += 10 + 34
+        }
+        if queueManager.isQueueVisible {
+            height += minimalisticQueueExtraHeight
         }
         if shouldShowTimerCountdown {
             height += minimalisticTimerCountdownBlockHeight
@@ -1211,9 +1225,6 @@ private struct MinimalisticReminderDetailsView: View {
 
     private struct MinimalisticUpNextButton: View {
         @ObservedObject private var queueManager = MusicQueueManager.shared
-        @EnvironmentObject private var vm: DynamicIslandViewModel
-        @State private var isPopoverPresented = false
-        @State private var isHoveringPopover = false
 
         var body: some View {
             MinimalisticSquircircleButton(
@@ -1222,42 +1233,19 @@ private struct MinimalisticReminderDetailsView: View {
                 fontWeight: .medium,
                 frameSize: CGSize(width: 40, height: 40),
                 cornerRadius: 16,
-                foregroundColor: .white.opacity(0.85),
+                foregroundColor: queueManager.isQueueVisible ? .accentColor : .white.opacity(0.85),
                 symbolEffectStyle: .replace
             ) {
-                isPopoverPresented.toggle()
+                // Expands the notch downward with the inline queue, the same
+                // way lyrics grow the panel — not a detached popover.
+                withAnimation(.smooth(duration: 0.25)) {
+                    queueManager.toggleQueueVisible()
+                }
             }
             .accessibilityLabel("Up Next")
-            .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
-                MusicQueuePopover(
-                    queueManager: queueManager,
-                    onHoverChanged: { hovering in
-                        isHoveringPopover = hovering
-                        updateActivity()
-                    }
-                ) {
-                    isPopoverPresented = false
-                    isHoveringPopover = false
-                    updateActivity()
-                }
-            }
-            .onChange(of: isPopoverPresented) { _, presented in
-                if presented {
-                    queueManager.startObserving()
-                } else {
-                    queueManager.stopObserving()
-                    isHoveringPopover = false
-                }
-                updateActivity()
-            }
             .onDisappear {
-                queueManager.stopObserving()
-                vm.isMediaOutputPopoverActive = false
+                queueManager.hideQueue()
             }
-        }
-
-        private func updateActivity() {
-            vm.isMediaOutputPopoverActive = isPopoverPresented && isHoveringPopover
         }
     }
 

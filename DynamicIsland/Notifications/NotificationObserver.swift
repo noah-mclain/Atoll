@@ -331,7 +331,7 @@ final class NotificationObserver: NSObject, ObservableObject {
         atollNotifLog("scan \(source): AXWindows status=\(status.rawValue), elements=\(count)")
     }
 
-    private func process(window: AXUIElement, source: String) {
+    private func process(window: AXUIElement, source: String, attempt: Int = 0) {
         var roleRef: CFTypeRef?
         AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &roleRef)
         let role = roleRef as? String
@@ -341,6 +341,22 @@ final class NotificationObserver: NSObject, ObservableObject {
         guard role == kAXWindowRole else { return }
 
         guard let signature = Self.signatureFor(window: window) else { return }
+
+        // A harvest of just the host chrome ("Notification Center", one lone
+        // string) means the banner window exists but its text hasn't populated
+        // yet. Never mark that signature seen — it repeats across banners, so
+        // deduping it swallows the real content once it lands (FaceTime call
+        // banners sat invisible for minutes this way). Retry shortly instead.
+        if !signature.contains("│") {
+            if attempt < 3 {
+                let delay = [0.35, 0.8, 1.6][attempt]
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.process(window: window, source: source, attempt: attempt + 1)
+                }
+            }
+            return
+        }
+
         guard !seenWindowSignatures.contains(signature) else { return }
         seenWindowSignatures.insert(signature)
         if seenWindowSignatures.count > 512 {
@@ -377,7 +393,9 @@ final class NotificationObserver: NSObject, ObservableObject {
             history.removeLast(history.count - Self.historyLimit)
         }
 
-        if NotificationSettings.shared.shouldExpand(for: notification.source) {
+        let expands = NotificationSettings.shared.shouldExpand(for: notification.source)
+        atollNotifLog("expand decision: behavior=\(NotificationSettings.shared.expandBehavior.rawValue), source=\(notification.source.displayName) → \(expands ? "expand" : "peek")")
+        if expands {
             peekNotification = nil
             pendingNotifications.append(notification)
             Self.enterCommunicationMode()
@@ -453,7 +471,9 @@ final class NotificationObserver: NSObject, ObservableObject {
             savedPreviousView = coordinator.currentView
             coordinator.currentView = .communication
         }
-        AppDelegate.shared?.vm.open()
+        // Open on every window-backed view model — the bare `vm` drives
+        // nothing when the island is mirrored to all displays.
+        AppDelegate.shared?.openNotchForInterruption()
     }
 
     static func tryExitCommunicationMode() {
@@ -468,7 +488,7 @@ final class NotificationObserver: NSObject, ObservableObject {
             coordinator.currentView = savedPreviousView ?? .home
         }
         savedPreviousView = nil
-        AppDelegate.shared?.vm.close()
+        AppDelegate.shared?.closeNotchAfterInterruption()
     }
 
     // MARK: - PID discovery

@@ -23,7 +23,9 @@ extension Defaults.Keys {
     static let discordRingtonePath = Key<String?>("discordRingtonePath", default: nil)
     static let callRingtoneVolume = Key<Double>("callRingtoneVolume", default: 1.0)
     static let callFallbackRingtoneName = Key<String>("callFallbackRingtoneName", default: "Glass")
-    static let callAutoDeclineAfterSeconds = Key<Int>("callAutoDeclineAfterSeconds", default: 0)
+    // FaceTime gives up ringing around the minute mark; if the "missed call"
+    // banner never lands, this stops a stale ring from playing forever.
+    static let callAutoDeclineAfterSeconds = Key<Int>("callAutoDeclineAfterSeconds", default: 75)
 }
 
 @MainActor

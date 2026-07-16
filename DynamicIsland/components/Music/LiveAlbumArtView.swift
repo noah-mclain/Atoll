@@ -60,34 +60,6 @@ struct LiveAlbumArtGlow: View {
     }
 }
 
-/// Breathing pulse applied to the artwork itself while playing.
-struct LiveAlbumArtPulse: ViewModifier {
-    let isPlaying: Bool
-
-    @State private var breathe = false
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(isPlaying && breathe ? 1.015 : 1.0)
-            .onAppear { restart() }
-            .onChange(of: isPlaying) { _, _ in restart() }
-    }
-
-    private func restart() {
-        breathe = false
-        guard isPlaying else { return }
-        withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-            breathe = true
-        }
-    }
-}
-
-extension View {
-    func liveAlbumArtPulse(isPlaying: Bool) -> some View {
-        modifier(LiveAlbumArtPulse(isPlaying: isPlaying))
-    }
-}
-
 // MARK: - Dominant color extraction
 
 extension NSImage {

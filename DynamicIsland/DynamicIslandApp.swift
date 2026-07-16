@@ -539,6 +539,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         resizeWindows(to: size, animated: animated, force: force)
     }
 
+    /// View models that drive a visible notch window right now: the per-screen
+    /// set when mirroring to every display, else the primary one. The bare
+    /// `vm` has no window of its own in all-displays mode, so opening just it
+    /// changes nothing on screen.
+    var activeViewModels: [DynamicIslandViewModel] {
+        Defaults[.showOnAllDisplays] && !viewModels.isEmpty ? Array(viewModels.values) : [vm]
+    }
+
+    /// Opens the notch for a system interruption (incoming call, notification
+    /// banner, agent prompt) on every screen that hosts a window.
+    func openNotchForInterruption() {
+        for viewModel in activeViewModels {
+            viewModel.open()
+        }
+    }
+
+    /// Counterpart to `openNotchForInterruption` — closes every open notch
+    /// window once the interruption is dismissed. It can't tell an
+    /// interruption-opened notch from a manually opened one; callers only
+    /// invoke it when the interruption content was the frontmost view.
+    func closeNotchAfterInterruption() {
+        for viewModel in activeViewModels where viewModel.notchState == .open {
+            viewModel.close()
+        }
+    }
+
     private func resizeWindows(to size: CGSize, animated: Bool, force: Bool) {
         guard size.width > 0, size.height > 0 else { return }
 

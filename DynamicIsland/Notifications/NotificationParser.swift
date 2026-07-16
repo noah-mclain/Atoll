@@ -92,8 +92,54 @@ enum NotificationParser {
             isVoiceMessage: voiceHint,
             voiceMessageURL: nil,
             timestamp: Date(),
-            axBannerRef: window
+            axBannerRef: window,
+            nativeActions: harvestActionButtons(from: window)
         )
+    }
+
+    /// Buttons whose press we never mirror: banner chrome, plus Reply (the
+    /// quick-reply flow drives that one itself).
+    private static let ignoredActionTitles: Set<String> = ["Close", "Clear", "Reply"]
+
+    /// Collects the banner's real action buttons ("Allow", "Don't Allow",
+    /// "Mark as Read", …) so ours can press them.
+    private static func harvestActionButtons(from window: AXUIElement) -> [NotificationNativeAction] {
+        var actions: [NotificationNativeAction] = []
+        var queue: [AXUIElement] = [window]
+        var visited = 0
+
+        while !queue.isEmpty, visited < 64, actions.count < 4 {
+            let element = queue.removeFirst()
+            visited += 1
+
+            var roleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+            if roleRef as? String == kAXButtonRole {
+                var title = ""
+                for attr in [kAXTitleAttribute, kAXDescriptionAttribute] {
+                    var ref: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success,
+                       let str = ref as? String, !str.isEmpty {
+                        title = str
+                        break
+                    }
+                }
+                if !title.isEmpty, !ignoredActionTitles.contains(title) {
+                    actions.append(NotificationNativeAction(
+                        title: title,
+                        element: element,
+                        axAction: kAXPressAction as String
+                    ))
+                }
+            }
+
+            var childrenRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+               let children = childrenRef as? [AXUIElement] {
+                queue.append(contentsOf: children)
+            }
+        }
+        return actions
     }
 
     /// Strips the bidirectional marks Notification Center injects around
@@ -196,7 +242,7 @@ enum NotificationParser {
         // which would otherwise leak into the body.
         let actionable: Set<String> = [
             "Reply", "Show", "Mark as Read", "Options", "Close", "Clear",
-            "Mute", "Like", "Decline", "Accept",
+            "Mute", "Like", "Decline", "Accept", "Allow", "Don't Allow",
         ]
         return actionable.contains(s)
     }

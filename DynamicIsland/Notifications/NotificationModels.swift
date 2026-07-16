@@ -94,6 +94,27 @@ enum NotificationAppSource: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Native banner actions
+
+/// An action button harvested from the system banner (e.g. "Allow" /
+/// "Don't Allow" on a permission notification). Pressing it forwards to the
+/// real AX element, so the choice actually fires in the posting app — only
+/// valid while the system banner is still alive.
+struct NotificationNativeAction: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let element: AXUIElement
+    let axAction: String
+
+    static func == (lhs: NotificationNativeAction, rhs: NotificationNativeAction) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func perform() {
+        AXUIElementPerformAction(element, axAction as CFString)
+    }
+}
+
 // MARK: - Notification Model
 
 struct AtollNotification: Identifiable, Equatable {
@@ -113,6 +134,8 @@ struct AtollNotification: Identifiable, Equatable {
     /// Reference to the system banner's AXUIElement, used so we can press its
     /// native Reply action without re-opening the source app.
     let axBannerRef: AXUIElement?
+    /// Action buttons mirrored from the system banner, pressable from ours.
+    let nativeActions: [NotificationNativeAction]
 
     init(
         id: UUID = UUID(),
@@ -126,7 +149,8 @@ struct AtollNotification: Identifiable, Equatable {
         isVoiceMessage: Bool = false,
         voiceMessageURL: URL? = nil,
         timestamp: Date = Date(),
-        axBannerRef: AXUIElement? = nil
+        axBannerRef: AXUIElement? = nil,
+        nativeActions: [NotificationNativeAction] = []
     ) {
         self.id = id
         self.source = source
@@ -140,6 +164,7 @@ struct AtollNotification: Identifiable, Equatable {
         self.voiceMessageURL = voiceMessageURL
         self.timestamp = timestamp
         self.axBannerRef = axBannerRef
+        self.nativeActions = nativeActions
     }
 
     static func == (lhs: AtollNotification, rhs: AtollNotification) -> Bool {

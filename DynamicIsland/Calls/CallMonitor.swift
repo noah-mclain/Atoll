@@ -91,12 +91,31 @@ final class CallMonitor: NSObject, ObservableObject {
             .compactMap { $0 }
             .sink { [weak self] notification in
                 guard let self else { return }
+                // The "missed call" / "call ended" follow-up is the reliable
+                // signal that ringing stopped in the source app — kill our
+                // ringtone instead of letting it play on. The notification
+                // itself stays in the feed as a normal banner.
+                if case .ringing = self.callState, Self.indicatesCallEnded(notification) {
+                    self.dismissCall()
+                    return
+                }
                 if let call = Self.callFromBanner(notification) {
                     NotificationObserver.shared.dismiss(notification)
                     self.presentCall(call)
                 }
             }
             .store(in: &cancellables)
+    }
+
+    /// True when the banner reads like the end of a call attempt (missed,
+    /// declined elsewhere, or hung up) rather than a new incoming ring.
+    private static func indicatesCallEnded(_ notification: AtollNotification) -> Bool {
+        let text = "\(notification.senderName) \(notification.body)".lowercased()
+        return text.contains("missed")
+            || text.contains("call ended")
+            || text.contains("declined")
+            || text.contains("cancelled call")
+            || text.contains("canceled call")
     }
 
     /// Returns an AtollCall if the banner reads like an incoming call.

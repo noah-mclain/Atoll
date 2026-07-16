@@ -44,8 +44,9 @@ final class MusicQueueManager: ObservableObject {
     /// While true the open notch swaps the calendar panel for the queue.
     @Published private(set) var isQueueVisible = false
 
-    /// How many upcoming tracks to surface in the popover.
-    private static let fetchLimit = 10
+    /// How many upcoming tracks to surface in the queue panel. Five rows are
+    /// visible at rest; the remainder scrolls.
+    private static let fetchLimit = 15
     private static let fieldSeparator = "||"
 
     private var artworkCache: [Int: NSImage] = [:]
@@ -120,6 +121,49 @@ final class MusicQueueManager: ObservableObject {
         Task {
             try? await AppleScriptHelper.executeVoid(script)
             try? await Task.sleep(nanoseconds: 400_000_000)
+            self.refresh()
+        }
+    }
+
+    // MARK: - Reordering
+
+    /// Live preview while a row is dragged — only mutates the published list.
+    func reorderLocally(fromOffsets source: IndexSet, toOffset destination: Int) {
+        var reordered = upNext
+        reordered.move(fromOffsets: source, toOffset: destination)
+        upNext = reordered
+    }
+
+    /// Mirrors a finished drag into Music.app. AppleScript can only reorder
+    /// real (user) playlists — for album or library playback the move sticks
+    /// visually until the next refresh snaps back to Music's actual order.
+    func commitMove(of trackID: Int) {
+        guard let index = upNext.firstIndex(where: { $0.id == trackID }) else { return }
+
+        let script: String
+        if index + 1 < upNext.count {
+            let successor = upNext[index + 1]
+            script = """
+            tell application "Music"
+                try
+                    set cp to current playlist
+                    move (first track of cp whose database ID is \(trackID)) to before (first track of cp whose database ID is \(successor.id))
+                end try
+            end tell
+            """
+        } else {
+            script = """
+            tell application "Music"
+                try
+                    set cp to current playlist
+                    move (first track of cp whose database ID is \(trackID)) to end of cp
+                end try
+            end tell
+            """
+        }
+        Task {
+            try? await AppleScriptHelper.executeVoid(script)
+            try? await Task.sleep(nanoseconds: 600_000_000)
             self.refresh()
         }
     }
