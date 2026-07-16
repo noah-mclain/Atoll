@@ -80,14 +80,12 @@ struct AgentLiveActivity: View {
         }
         .frame(height: vm.effectiveClosedNotchHeight, alignment: .center)
         .onTapGesture {
-            // Waiting on a choice → jump straight to the terminal to answer;
-            // otherwise open the expanded agent panel.
-            if primary?.state == .waitingForInput {
-                AgentActivityMonitor.focusAgentTerminal()
-            } else {
-                coordinator.currentView = .agent
-                AppDelegate.shared?.vm.open()
-            }
+            // The panel now carries the prompt's options and a reply field,
+            // so every tap opens it — no more jumping to the terminal.
+            coordinator.currentView = .agent
+            // This window's own view model — the delegate's bare `vm`
+            // drives nothing when the island shows on every display.
+            vm.open()
         }
     }
 
