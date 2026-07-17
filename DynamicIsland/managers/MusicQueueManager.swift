@@ -231,10 +231,25 @@ final class MusicQueueManager: ObservableObject {
 
     private static func fetchUpNext() async -> [QueueTrack] {
         // Music.app doesn't expose its true Up Next to AppleScript, so we
-        // derive it from the playing container: prefer the current playlist,
-        // and fall back to the current track's album (covers single tracks
-        // played outside a playlist, which have no `current playlist`). Any
-        // AppleScript failure is surfaced as "ERR:<reason>" for the log
+        // derive it from the playing container — the tracks that follow the
+        // current one in `current playlist`.
+        //
+        // That container is the whole story. When Apple Music autoplays past
+        // a track, or streams one outside any playlist, `current playlist`
+        // raises "Can't get current playlist": there is no container, and
+        // nothing on disk says what plays next. Anything listed in that state
+        // is invention, so we list nothing.
+        //
+        // A playlist — the user's own, a smart one, or one from Apple Music —
+        // is its own queue, so the tracks after the current index are exactly
+        // what plays next.
+        //
+        // The library is not: it plays in the order it's shown, which is the
+        // order tracks were added, so the entries either side of the current
+        // index belong to unrelated albums. The one dependable queue it has is
+        // an album running front-to-back, so that's what we gather there.
+        //
+        // Any AppleScript failure is surfaced as "ERR:<reason>" for the log
         // rather than silently swallowed.
         let script = """
         tell application "Music"
@@ -245,15 +260,23 @@ final class MusicQueueManager: ObservableObject {
             on error
                 return "ERR:no current track"
             end try
-            set curName to name of curTrack
             set curAlbum to album of curTrack
+            set curID to database ID of curTrack
 
-            -- Preferred source: the current playlist context.
+            set cp to missing value
             try
                 set cp to current playlist
-                set curIdx to index of current track
-                set totalCount to count of tracks of cp
-                if curIdx < totalCount then
+            end try
+            if cp is missing value then return "ERR:no playlist context"
+
+            -- Anything but the library orders its own queue. Tested against
+            -- the class rather than for `user playlist`, which a subscription
+            -- (Apple Music) playlist is not.
+            if class of cp is not library playlist then
+                try
+                    set curIdx to index of current track
+                    set totalCount to count of tracks of cp
+                    if curIdx ≥ totalCount then return "ERR:no upcoming tracks"
                     set maxIdx to curIdx + \(fetchLimit)
                     if maxIdx > totalCount then set maxIdx to totalCount
                     set out to ""
@@ -261,13 +284,16 @@ final class MusicQueueManager: ObservableObject {
                         set t to track i of cp
                         set out to out & i & "\(fieldSeparator)" & (name of t) & "\(fieldSeparator)" & (artist of t) & "\(fieldSeparator)" & (album of t) & "\(fieldSeparator)" & (database ID of t) & linefeed
                     end repeat
-                    if out is not "" then return out
-                end if
-            end try
+                    if out is "" then return "ERR:no upcoming tracks"
+                    return out
+                on error errMsg
+                    return "ERR:" & errMsg
+                end try
+            end if
 
-            -- Fallback: remaining tracks of the current album, in order.
+            -- Library playback: the rest of the current album, in album order.
             try
-                set albumTracks to (every track of playlist "Library" whose album is curAlbum)
+                set albumTracks to (every track of cp whose album is curAlbum)
                 set out to ""
                 set past to false
                 set added to 0
@@ -276,10 +302,10 @@ final class MusicQueueManager: ObservableObject {
                         set out to out & (index of t) & "\(fieldSeparator)" & (name of t) & "\(fieldSeparator)" & (artist of t) & "\(fieldSeparator)" & (album of t) & "\(fieldSeparator)" & (database ID of t) & linefeed
                         set added to added + 1
                     end if
-                    if (name of t) is curName then set past to true
+                    if (database ID of t) is curID then set past to true
                 end repeat
-                if out is not "" then return out
-                return "ERR:no upcoming tracks in album"
+                if out is "" then return "ERR:no upcoming tracks"
+                return out
             on error errMsg
                 return "ERR:" & errMsg
             end try

@@ -341,12 +341,6 @@ struct MusicControlsView: View {
                 frameWidth: width
             )
             .fontWeight(.medium)
-            // Live lyrics under the author name: the synced current line bold
-            // with its neighbors dimmed, Apple Music-style.
-            if enableLyrics {
-                LiveLyricsView(frameWidth: width)
-                    .padding(.top, 2)
-            }
         }
     }
 
@@ -673,6 +667,7 @@ struct NotchHomeView: View {
     @ObservedObject private var queueManager = MusicQueueManager.shared
     @Default(.showStandardMediaControls) private var showStandardMediaControls
     @Default(.autoHideInactiveNotchMediaPlayer) private var autoHideInactiveNotchMediaPlayer
+    @Default(.enableLyrics) private var enableLyrics
     let albumArtNamespace: Namespace.ID
 
     /// Whether the music player should actively display (enabled AND has real content).
@@ -710,6 +705,15 @@ struct NotchHomeView: View {
                 if queueManager.isQueueVisible {
                     // The up-next queue borrows the calendar's slot while open.
                     MusicQueuePanel(queueManager: queueManager)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .onHover { isHovering in
+                            vm.isHoveringCalendar = isHovering
+                        }
+                        .transition(.opacity.combined(with: .blurReplace))
+                } else if enableLyrics, shouldShowMusicPlayer {
+                    // Lyrics take the same slot: beside the album art they had
+                    // one truncated line each, here they can wrap and scroll.
+                    LyricsPanel()
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .onHover { isHovering in
                             vm.isHoveringCalendar = isHovering

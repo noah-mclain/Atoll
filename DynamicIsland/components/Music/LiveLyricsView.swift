@@ -10,14 +10,12 @@
 
 import SwiftUI
 
-/// Apple Music-style live lyrics: the current synced line bold and bright,
-/// its neighbors dim and slightly blurred above/below, scrolling as playback
-/// advances. Falls back to the single running line when the track only has
-/// plain (unsynced) lyrics.
-struct LiveLyricsView: View {
+/// Full lyrics for the open notch, taking the calendar's slot so lines have
+/// the width to wrap instead of truncating beside the album art. Reads like
+/// Apple Music: the whole song is there, the current line bright and bold,
+/// everything else dimmed, scrolling itself as playback advances.
+struct LyricsPanel: View {
     @ObservedObject private var musicManager = MusicManager.shared
-
-    let frameWidth: CGFloat
 
     private var lines: [LyricLine] { musicManager.syncedLyrics }
     private var index: Int { musicManager.currentLyricIndex }
@@ -28,61 +26,75 @@ struct LiveLyricsView: View {
         lines.count > 1 || (lines.first?.timestamp ?? 0) > 0
     }
 
+    private var plainText: String {
+        musicManager.currentLyrics.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
-        if hasSyncedLines {
-            VStack(alignment: .leading, spacing: 2) {
-                neighborLine(at: index - 1)
-                currentLine
-                neighborLine(at: index + 1)
+        Group {
+            if hasSyncedLines {
+                syncedLines
+            } else if !plainText.isEmpty {
+                plainBlock
+            } else {
+                placeholder
             }
-            .frame(width: frameWidth, alignment: .leading)
-            .animation(.smooth(duration: 0.35), value: index)
-        } else {
-            plainFallback
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private var syncedLines: some View {
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(lines.enumerated()), id: \.element.id) { position, line in
+                        Text(line.text.isEmpty ? "♪" : line.text)
+                            .font(.system(size: position == index ? 14 : 12,
+                                          weight: position == index ? .bold : .medium))
+                            .foregroundStyle(position == index ? .white : .white.opacity(0.3))
+                            // Wrap rather than truncate — the whole point of
+                            // giving lyrics the wider slot.
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(position)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .onChange(of: index) { _, current in
+                guard lines.indices.contains(current) else { return }
+                withAnimation(.smooth(duration: 0.35)) {
+                    proxy.scrollTo(current, anchor: .center)
+                }
+            }
+            .onAppear {
+                guard lines.indices.contains(index) else { return }
+                proxy.scrollTo(index, anchor: .center)
+            }
+        }
+        .animation(.smooth(duration: 0.3), value: index)
+    }
+
+    private var plainBlock: some View {
+        ScrollView(showsIndicators: false) {
+            Text(plainText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
         }
     }
 
-    @ViewBuilder
-    private var currentLine: some View {
-        let text = lines.indices.contains(index) ? lines[index].text : ""
-        Text(text.isEmpty ? "…" : text)
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .id("current-\(index)")
-            .transition(.asymmetric(
-                insertion: .move(edge: .bottom).combined(with: .opacity),
-                removal: .move(edge: .top).combined(with: .opacity)
-            ))
-    }
-
-    @ViewBuilder
-    private func neighborLine(at i: Int) -> some View {
-        let text = lines.indices.contains(i) ? lines[i].text : ""
-        Text(text.isEmpty ? " " : text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.32))
-            .blur(radius: 0.5)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .id("neighbor-\(i)")
-            .transition(.opacity)
-    }
-
-    @ViewBuilder
-    private var plainFallback: some View {
-        let line = musicManager.currentLyrics.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !line.isEmpty {
-            MarqueeText(
-                Binding(get: { musicManager.currentLyrics }, set: { _ in }),
-                font: .system(size: 12, weight: .regular),
-                nsFont: .headline,
-                textColor: .white.opacity(0.7),
-                minDuration: 0.35,
-                frameWidth: frameWidth
-            )
-            .id(line)
+    private var placeholder: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "quote.bubble")
+                .font(.system(size: 20))
+                .foregroundStyle(.white.opacity(0.25))
+            Text("No lyrics for this track")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.35))
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
