@@ -90,6 +90,18 @@ public enum NotchViews {
     case agent
     /// Scrollback of recently received notifications, with inline reply.
     case notifications
+
+    /// Views the notch enters on its own, because something arrived — a call,
+    /// a banner, an agent prompt — rather than because the user picked a tab.
+    ///
+    /// Whatever else steers the notch as it opens has to give way to these, or
+    /// the interruption is discarded in the same pass that raised it.
+    var isInterruption: Bool {
+        switch self {
+        case .communication, .agent, .notifications: return true
+        default:                                     return false
+        }
+    }
 }
 
 enum NotesLayoutState: Equatable {

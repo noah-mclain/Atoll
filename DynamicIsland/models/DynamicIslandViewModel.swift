@@ -99,6 +99,9 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
         guard let lastCopyDate = ClipboardManager.shared.lastCopiedItemDate else { return }
         guard Date().timeIntervalSince(lastCopyDate) <= clipboardFocusWindow else { return }
         guard coordinator.currentView != .notes else { return }
+        // A recent copy doesn't outrank a call or banner that just opened the
+        // notch — this runs from `open()`, including the opens they trigger.
+        guard !coordinator.currentView.isInterruption else { return }
         withAnimation(.smooth) {
             coordinator.currentView = .notes
         }

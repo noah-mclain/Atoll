@@ -116,8 +116,7 @@ class DynamicIslandViewCoordinator: ObservableObject {
             // call / notification banners, the alerts scrollback, and agent
             // prompts are higher-priority than the tab restriction is meant
             // to silence. They only appear when triggered, never as tabs.
-            let interruptionViews: [NotchViews] = [.communication, .agent, .notifications]
-            if Defaults[.enableMinimalisticUI] && currentView != .home && !interruptionViews.contains(currentView) {
+            if Defaults[.enableMinimalisticUI] && currentView != .home && !currentView.isInterruption {
                 currentView = .home
                 return
             }
@@ -284,7 +283,9 @@ class DynamicIslandViewCoordinator: ObservableObject {
 
     private func handleMinimalisticModeChange(_ isEnabled: Bool) {
         guard isEnabled else { return }
-        if currentView != .home {
+        // Same exemption `currentView`'s own didSet makes: switching to
+        // minimalistic silences the tabs, not a call that's ringing now.
+        if currentView != .home && !currentView.isInterruption {
             withAnimation(.smooth) {
                 currentView = .home
             }

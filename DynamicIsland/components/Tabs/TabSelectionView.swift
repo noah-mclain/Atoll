@@ -187,6 +187,13 @@ struct TabSelectionView: View {
 
     private func ensureValidSelection(with tabs: [TabModel]) {
         guard !tabs.isEmpty else { return }
+        // The header mounts every time the notch opens, so this runs in the
+        // same pass that an arriving call or banner opened it for.
+        // `.communication` is the one view with no tab of its own, so it reads
+        // as an invalid selection here and would be reset before it ever drew.
+        // The other interruption views do have tabs while they have something
+        // to show, and should fall back to Home once they don't.
+        guard coordinator.currentView != .communication else { return }
         if tabs.contains(where: { isSelected($0) }) {
             return
         }
